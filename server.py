@@ -143,6 +143,62 @@ def visible_answer(text: str) -> str:
     return cleaned[:cut].rstrip()
 
 
+def compact_activity(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    think = ""
+    for entry in entries:
+        kind = entry.get("kind") or "note"
+        if kind == "think":
+            think += str(entry.get("text") or "")
+            continue
+        key = (kind, str(entry.get("query") or entry.get("url") or entry.get("text") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(entry)
+    if think.strip():
+        out.insert(0, {"kind": "think", "text": think.strip()})
+    return out[:80]
+
+
+def harvest_activity(event: dict[str, Any]) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    etype = str(event.get("type") or "")
+    item = event.get("item") if isinstance(event.get("item"), dict) else {}
+    action = item.get("action") if isinstance(item.get("action"), dict) else {}
+    extra_action = event.get("action") if isinstance(event.get("action"), dict) else {}
+    query = action.get("query") or extra_action.get("query") or item.get("query")
+    url = action.get("url") or extra_action.get("url") or item.get("url")
+    title = action.get("title") or extra_action.get("title") or item.get("title")
+    if "reasoning" in etype:
+        delta = event.get("delta") or ""
+        part = event.get("part") if isinstance(event.get("part"), dict) else {}
+        text = delta or part.get("text") or ""
+        if text:
+            entries.append({"kind": "think", "text": str(text)})
+    if query:
+        entries.append({"kind": "search", "query": str(query)})
+    if url:
+        entries.append({"kind": "page", "url": str(url), "title": str(title or url)})
+    code = item.get("code") or (item.get("inputs") if isinstance(item.get("inputs"), str) else None)
+    if code and "code" in f"{etype} {item.get('type') or ''}".lower():
+        entries.append({"kind": "code", "text": str(code)[:4000]})
+    ann = event.get("annotation")
+    if isinstance(ann, dict) and ann.get("url"):
+        entries.append({"kind": "page", "url": str(ann["url"]), "title": str(ann.get("title") or ann["url"])})
+    resp = event.get("response") if isinstance(event.get("response"), dict) else {}
+    for cite in resp.get("citations") or []:
+        if isinstance(cite, str):
+            entries.append({"kind": "page", "url": cite, "title": cite})
+        elif isinstance(cite, dict) and cite.get("url"):
+            entries.append({"kind": "page", "url": str(cite["url"]), "title": str(cite.get("title") or cite["url"])})
+    for out_item in resp.get("output") or []:
+        if isinstance(out_item, dict):
+            entries.extend(harvest_activity({"type": str(out_item.get("type") or ""), "item": out_item}))
+    return entries
+
+
 def tool_status(etype: str, item_type: str = "") -> str | None:
     blob = f"{etype} {item_type}".lower()
     if "x_search" in blob:
@@ -569,6 +625,7 @@ class ChatIn(BaseModel):
 
 class ConversationPatch(BaseModel):
     title: str | None = None
+    truncate_before: str | None = None
 
 
 class SettingsIn(BaseModel):
@@ -673,7 +730,17 @@ async def patch_conversation(cid: str, body: ConversationPatch) -> dict[str, Any
         title = body.title.strip() or "新对话"
         item["title"] = title[:80]
         item["updated_at"] = now_iso()
-        upsert_conversation(item)
+    if body.truncate_before:
+        msgs = item.get("messages") or []
+        idx = next((i for i, msg in enumerate(msgs) if msg.get("id") == body.truncate_before), None)
+        if idx is None:
+            raise HTTPException(400, "找不到要回退的消息")
+        if msgs[idx].get("source") == "cli":
+            raise HTTPException(400, "不能改写 CLI 原对话")
+        item["messages"] = msgs[:idx]
+        item["previous_response_id"] = None
+        item["updated_at"] = now_iso()
+    upsert_conversation(item)
     return item
 
 
@@ -889,6 +956,7 @@ async def chat(body: ChatIn) -> StreamingResponse:
         visible_len = 0
         response_id = None
         status_sent = False
+        activity: list[dict[str, Any]] = []
         wants_search = bool(
             body.web_search
             or mode in {"research", "web"}
@@ -939,6 +1007,9 @@ async def chat(body: ChatIn) -> StreamingResponse:
                             elif etype == "response.completed":
                                 response = event.get("response") or {}
                                 response_id = response.get("id") or event.get("id")
+                                for entry in harvest_activity(event):
+                                    activity.append(entry)
+                                    yield sse({"type": "activity", "entry": entry})
                             elif etype in {"response.failed", "error"}:
                                 err = event.get("error") or event.get("response") or event
                                 message = ""
@@ -957,6 +1028,9 @@ async def chat(body: ChatIn) -> StreamingResponse:
                                 note = tool_status(etype, str(item.get("type") or ""))
                                 if note:
                                     yield sse({"type": "status", "text": note})
+                                for entry in harvest_activity(event):
+                                    activity.append(entry)
+                                    yield sse({"type": "activity", "entry": entry})
         except asyncio.CancelledError:
             return
         except Exception as exc:
@@ -967,9 +1041,12 @@ async def chat(body: ChatIn) -> StreamingResponse:
         if not full.strip():
             full = "这一轮没有形成可读回答。请再试一次。"
         latest = get_conversation(convo["id"])
+        trail = compact_activity(activity)
         for msg in latest["messages"]:
             if msg["id"] == assistant_msg["id"]:
                 msg["content"] = full
+                if trail:
+                    msg["activity"] = trail
                 break
         if response_id:
             latest["previous_response_id"] = response_id
@@ -980,6 +1057,7 @@ async def chat(body: ChatIn) -> StreamingResponse:
                 "type": "done",
                 "response_id": response_id,
                 "text": full,
+                "activity": trail,
                 "conversation": public_conversation(latest),
             }
         )

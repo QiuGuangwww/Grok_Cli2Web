@@ -82,6 +82,8 @@ button {
   display: flex;
   height: 100%;
   min-height: 100dvh;
+  --sidebar: 280px;
+  --inspect: 340px;
 }
 
 .sidebar {
@@ -161,6 +163,12 @@ button {
 .search-wrap {
   position: relative;
   margin-bottom: 16px;
+  border-radius: 12px;
+}
+
+.search-wrap:hover,
+.search-wrap:focus-within {
+  background: var(--bg-hover);
 }
 
 .search-wrap svg {
@@ -188,8 +196,82 @@ button {
   color: var(--text-faint);
 }
 
-.search-wrap:focus-within {
-  background: var(--bg-hover);
+.gutter {
+  flex: 0 0 6px;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  z-index: 4;
+}
+
+.gutter::after {
+  content: "";
+  position: absolute;
+  inset: 12px 2px;
+  border-radius: 99px;
+}
+
+.gutter:hover::after,
+.gutter.dragging::after {
+  background: var(--border-strong);
+}
+
+.inspect {
+  flex: 0 0 var(--inspect);
+  width: var(--inspect);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-sidebar);
+  border-left: 1px solid var(--border);
+}
+
+.inspect-head {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px 0 16px;
+}
+
+.inspect-head h2 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: -0.03em;
+}
+
+.inspect-body {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 16px 24px;
+}
+
+.inspect-card {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+}
+
+.inspect-card .k {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+
+.inspect-card a {
+  color: var(--accent);
+  word-break: break-all;
+  text-decoration: none;
+}
+
+.inspect-card pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  font: 13px var(--mono);
 }
 
 .recents-label,
@@ -208,21 +290,16 @@ button {
   padding-right: 2px;
 }
 
+.recents,
+.inspect-body {
+  scrollbar-width: none;
+}
+
 .recents::-webkit-scrollbar,
-.thread::-webkit-scrollbar,
-.messages::-webkit-scrollbar {
-  width: 10px;
-}
-
-.recents::-webkit-scrollbar-thumb,
-.thread::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 99px;
-}
-
-.recents:hover::-webkit-scrollbar-thumb,
-.thread:hover::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
+.inspect-body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .conv {
@@ -482,12 +559,20 @@ button {
 }
 
 .ghost-btn,
-.primary-btn {
+.primary-btn,
+a.ghost-btn,
+a.primary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   height: 34px;
   padding: 0 12px;
   border-radius: 10px;
   font-size: 13.5px;
   font-weight: 500;
+  line-height: 1;
+  text-decoration: none;
+  box-sizing: border-box;
 }
 
 .ghost-btn {
@@ -613,6 +698,35 @@ html[data-theme="dark"] .primary-btn {
 
 .turn {
   margin: 22px 0 28px;
+}
+
+.msg-actions {
+  display: flex;
+  gap: 2px;
+  margin-top: 6px;
+  opacity: 0.55;
+}
+
+.turn:hover .msg-actions,
+.msg-actions:focus-within {
+  opacity: 1;
+}
+
+.msg-actions.right {
+  justify-content: flex-end;
+}
+
+.msg-actions button {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.msg-actions button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .turn.user {
@@ -817,12 +931,19 @@ html[data-theme="dark"] .primary-btn {
 }
 
 .status {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
   color: var(--text-muted);
   font-size: 14px;
   margin-bottom: 8px;
+  border-radius: 999px;
+  padding: 4px 10px 4px 8px;
+}
+
+.status:hover {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .dots {
@@ -1216,8 +1337,18 @@ html[data-theme="dark"] .send.busy {
 .actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: 8px;
   margin-top: 16px;
+}
+
+.modal a:not(.primary-btn):not(.ghost-btn) {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.modal a:not(.primary-btn):not(.ghost-btn):hover {
+  text-decoration: underline;
 }
 
 .empty-recents {
@@ -1275,6 +1406,18 @@ html[data-theme="dark"] .error-banner {
 
   .hero {
     margin-top: 8vh;
+  }
+
+  .gutter {
+    display: none;
+  }
+
+  .inspect {
+    position: fixed;
+    inset: 0 0 0 auto;
+    width: min(100vw, 360px);
+    z-index: 35;
+    box-shadow: var(--shadow);
   }
 }
 

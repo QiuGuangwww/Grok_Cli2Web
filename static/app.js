@@ -77,6 +77,9 @@ const state = {
   slashIndex: 0,
   theme: localStorage.getItem("grok-theme") || "light",
   renameId: null,
+  inspectId: null,
+  leftW: Number(localStorage.getItem("grok-left-w")) || 280,
+  rightW: Number(localStorage.getItem("grok-right-w")) || 340,
 };
 
 const els = {
@@ -110,7 +113,120 @@ const els = {
   cmdDialog: $("cmdDialog"),
   cmdTitle: $("cmdTitle"),
   cmdBody: $("cmdBody"),
+  inspect: $("inspect"),
+  inspectBody: $("inspectBody"),
+  gutterLeft: $("gutterLeft"),
+  gutterRight: $("gutterRight"),
 };
+
+function applyWidths() {
+  const app = $("app");
+  if (!app) return;
+  app.style.setProperty("--sidebar", `${state.leftW}px`);
+  app.style.setProperty("--inspect", `${state.rightW}px`);
+}
+
+function bindGutter(el, side) {
+  if (!el) return;
+  el.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    el.classList.add("dragging");
+    const startX = e.clientX;
+    const start = side === "left" ? state.leftW : state.rightW;
+    const move = (ev) => {
+      const dx = ev.clientX - startX;
+      if (side === "left") state.leftW = Math.min(440, Math.max(200, start + dx));
+      else state.rightW = Math.min(560, Math.max(260, start - dx));
+      applyWidths();
+    };
+    const up = () => {
+      el.classList.remove("dragging");
+      window.removeEventListener("pointermove", move);
+      localStorage.setItem(side === "left" ? "grok-left-w" : "grok-right-w", String(side === "left" ? state.leftW : state.rightW));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up, { once: true });
+  });
+}
+
+async function truncateBefore(id) {
+  if (!state.current?.id) return;
+  const updated = await api(`/api/conversations/${state.current.id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ truncate_before: id }),
+  });
+  state.current.messages = updated.messages || [];
+  state.current.previous_response_id = updated.previous_response_id;
+  renderMessages();
+  renderRecents();
+}
+
+async function editUserMessage(id) {
+  const msgs = state.current?.messages || [];
+  const idx = msgs.findIndex((m) => m.id === id);
+  if (idx < 0) return;
+  const msg = msgs[idx];
+  if (msg.source === "cli") return toast("CLI 原话只能复制");
+  await truncateBefore(id);
+  els.input.value = msg.content || "";
+  resizeInput();
+  syncSendButton();
+  els.input.focus();
+}
+
+async function regenerateMessage(id) {
+  const msgs = state.current?.messages || [];
+  const idx = msgs.findIndex((m) => m.id === id);
+  if (idx < 0) return;
+  const user = [...msgs.slice(0, idx)].reverse().find((m) => m.role === "user");
+  if (!user || user.source === "cli") return toast("这条不能重新生成");
+  await truncateBefore(user.id);
+  els.input.value = user.content || "";
+  resizeInput();
+  await send();
+}
+
+function openInspect(id) {
+  state.inspectId = id;
+  if (els.inspect) els.inspect.hidden = false;
+  if (els.gutterRight) els.gutterRight.hidden = false;
+  renderInspect();
+}
+
+function closeInspect() {
+  state.inspectId = null;
+  if (els.inspect) els.inspect.hidden = true;
+  if (els.gutterRight) els.gutterRight.hidden = true;
+}
+
+function renderInspect() {
+  if (!els.inspectBody) return;
+  const msg = (state.current?.messages || []).find((m) => m.id === state.inspectId);
+  const items = msg?.activity || [];
+  if (!items.length) {
+    els.inspectBody.innerHTML = `<div class="inspect-card"><span class="k">状态</span>${escapeHtml(msg?.status || "还没有可展示的工具过程")}</div>`;
+    return;
+  }
+  els.inspectBody.innerHTML = items
+    .map((item) => {
+      if (item.kind === "think") {
+        return `<div class="inspect-card"><span class="k">思考</span>${escapeHtml(item.text || "")}</div>`;
+      }
+      if (item.kind === "search") {
+        return `<div class="inspect-card"><span class="k">搜索</span>${escapeHtml(item.query || "")}</div>`;
+      }
+      if (item.kind === "page") {
+        const href = item.url || "";
+        return `<div class="inspect-card"><span class="k">网页</span><a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${escapeHtml(item.title || href)}</a></div>`;
+      }
+      if (item.kind === "code") {
+        return `<div class="inspect-card"><span class="k">代码</span><pre>${escapeHtml(item.text || "")}</pre></div>`;
+      }
+      return `<div class="inspect-card"><span class="k">步骤</span>${escapeHtml(item.text || item.query || "")}</div>`;
+    })
+    .join("");
+}
 
 function applyTheme() {
   document.documentElement.dataset.theme = state.theme;
@@ -414,21 +530,30 @@ function renderMessages() {
           <div>
             ${renderAttachments(m.files)}
             ${m.content ? `<div class="bubble">${escapeHtml(m.content)}</div>` : ""}
+            <div class="msg-actions right">
+              <button type="button" data-msg="copy" data-id="${m.id}">复制</button>
+              ${m.source === "cli" ? "" : `<button type="button" data-msg="edit" data-id="${m.id}">编辑</button>`}
+            </div>
           </div>
         </div>`;
         }
         const pending = m.pending && !m.content;
         return `<div class="turn assistant" data-id="${m.id}">
         ${renderTools(m.tools)}
-        ${m.status || pending ? `<div class="status"><span class="dots"><i></i><i></i><i></i></span><span>${escapeHtml(m.status || "思考中")}</span></div>` : ""}
+        ${m.status || pending || m.activity?.length ? `<button class="status" type="button" data-inspect="${m.id}">${pending ? `<span class="dots"><i></i><i></i><i></i></span>` : ""}<span>${escapeHtml(m.status || (m.activity?.length ? "查看过程" : "思考中"))}</span></button>` : ""}
         ${m.content ? `<div class="md">${renderMarkdown(m.content)}</div>` : ""}
         ${m.error ? `<div class="error-banner">${escapeHtml(m.error)}</div>` : ""}
+        ${m.content || m.error ? `<div class="msg-actions">
+          <button type="button" data-msg="copy" data-id="${m.id}">复制</button>
+          ${m.source === "cli" || pending ? "" : `<button type="button" data-msg="regen" data-id="${m.id}">重新生成</button>`}
+        </div>` : ""}
       </div>`;
       })
       .join("");
   if (state.stickToBottom !== false) {
     els.thread.scrollTop = els.thread.scrollHeight;
   }
+  if (state.inspectId) renderInspect();
 }
 
 function syncSendButton() {
@@ -547,6 +672,7 @@ async function send() {
     content: "",
     pending: true,
     status: "思考中",
+    activity: [],
     files: [],
   };
   if (!state.current) {
@@ -600,16 +726,20 @@ async function send() {
           state.current.title = event.conversation.title;
         } else if (event.type === "status") {
           tempAsst.status = event.text;
+        } else if (event.type === "activity") {
+          tempAsst.activity = tempAsst.activity || [];
+          tempAsst.activity.push(event.entry);
+          if (state.inspectId === tempAsst.id) renderInspect();
         } else if (event.type === "delta") {
           tempAsst.content += event.text;
-          tempAsst.status = "";
         } else if (event.type === "error") {
           tempAsst.error = event.message;
           tempAsst.pending = false;
         } else if (event.type === "done") {
           tempAsst.content = event.text || tempAsst.content;
           tempAsst.pending = false;
-          tempAsst.status = "";
+          if (event.activity) tempAsst.activity = event.activity;
+          tempAsst.status = tempAsst.activity?.length ? "查看过程" : "";
           if (event.conversation) {
             state.current.title = event.conversation.title;
             state.current.id = event.conversation.id;
@@ -1024,7 +1154,19 @@ function bindEvents() {
     if (els.input.value.startsWith("/")) renderSlash();
     else hideSlash();
   });
+  let composing = false;
+  let composeEndedAt = 0;
+  els.input.addEventListener("compositionstart", () => {
+    composing = true;
+  });
+  els.input.addEventListener("compositionend", () => {
+    composing = false;
+    composeEndedAt = Date.now();
+  });
   els.input.addEventListener("keydown", (e) => {
+    if (composing || e.isComposing || e.keyCode === 229 || Date.now() - composeEndedAt < 80) {
+      return;
+    }
     if (state.slashOpen) {
       const items = filteredSlash();
       if (e.key === "ArrowDown") {
@@ -1108,6 +1250,30 @@ function bindEvents() {
   });
 
   els.thread.addEventListener("click", async (e) => {
+    const inspectBtn = e.target.closest("[data-inspect]");
+    if (inspectBtn) {
+      openInspect(inspectBtn.dataset.inspect);
+      return;
+    }
+    const act = e.target.closest("[data-msg]");
+    if (act) {
+      const kind = act.dataset.msg;
+      const id = act.dataset.id;
+      if (kind === "copy") {
+        const msg = (state.current?.messages || []).find((m) => m.id === id);
+        if (!msg?.content) return toast("没有可复制的内容");
+        const ok = await copyText(msg.content);
+        act.textContent = ok ? "已复制" : "复制失败";
+        setTimeout(() => {
+          act.textContent = "复制";
+        }, 1200);
+      } else if (kind === "edit") {
+        await editUserMessage(id);
+      } else if (kind === "regen") {
+        await regenerateMessage(id);
+      }
+      return;
+    }
     const btn = e.target.closest("[data-copy]");
     if (!btn) return;
     e.preventDefault();
@@ -1170,6 +1336,10 @@ async function init() {
   applyTheme();
   if (window.marked?.setOptions) marked.setOptions({ gfm: true, breaks: false });
   bindEvents();
+  applyWidths();
+  bindGutter(els.gutterLeft, "left");
+  bindGutter(els.gutterRight, "right");
+  $("closeInspect")?.addEventListener("click", closeInspect);
   renderModelMenu();
   renderModeBar();
   syncSendButton();
