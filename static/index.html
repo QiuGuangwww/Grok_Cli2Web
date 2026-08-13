@@ -4,7 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Grok</title>
-    <link rel="icon" href="/assets/favicon.svg?v=5" type="image/svg+xml" />
+    <link rel="icon" href="/assets/favicon.svg?v=18" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/assets/grok-icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -19,7 +20,7 @@
       id="hl-dark"
       disabled
     />
-    <link rel="stylesheet" href="/assets/styles.css?v=17" />
+    <link rel="stylesheet" href="/assets/styles.css?v=19" />
     <style>
       .drop-overlay,
       #dropOverlay {
@@ -36,19 +37,7 @@
         <div class="sidebar-top">
           <button class="brand" id="brandBtn" type="button" title="新对话">
             <span class="mark" aria-hidden="true">
-              <svg viewBox="0 0 32 32" fill="none">
-                <path d="M16 16c5.2-1.4 9.8.2 12.4 4.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-                <path d="M16 16c-5.2 1.4-9.8-.2-12.4-4.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-                <path d="M16 16c1.8 5.1.1 10-4.4 12.6" stroke="currentColor" stroke-width="1.55" stroke-linecap="round"/>
-                <path d="M16 16c-1.8-5.1-.1-10 4.4-12.6" stroke="currentColor" stroke-width="1.55" stroke-linecap="round"/>
-                <path d="M16 16c4.7 2.6 6.7 7.4 5.2 12" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" opacity=".85"/>
-                <path d="M16 16c-4.7-2.6-6.7-7.4-5.2-12" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" opacity=".85"/>
-                <circle cx="16" cy="16" r="2.35" fill="currentColor"/>
-                <circle cx="27.8" cy="19.6" r=".85" fill="currentColor"/>
-                <circle cx="4.2" cy="12.4" r=".85" fill="currentColor"/>
-                <circle cx="12.1" cy="28.1" r=".7" fill="currentColor"/>
-                <circle cx="19.9" cy="3.9" r=".7" fill="currentColor"/>
-              </svg>
+              <img src="/assets/grok-mark.svg" alt="" />
             </span>
             <span>Grok</span>
           </button>
@@ -116,21 +105,6 @@
         <div class="stage" id="stage">
         <section class="thread" id="thread">
           <div class="hero" id="hero">
-            <div class="hero-mark" aria-hidden="true">
-              <svg viewBox="0 0 32 32" fill="none">
-                <path d="M16 16c5.2-1.4 9.8.2 12.4 4.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-                <path d="M16 16c-5.2 1.4-9.8-.2-12.4-4.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-                <path d="M16 16c1.8 5.1.1 10-4.4 12.6" stroke="currentColor" stroke-width="1.55" stroke-linecap="round"/>
-                <path d="M16 16c-1.8-5.1-.1-10 4.4-12.6" stroke="currentColor" stroke-width="1.55" stroke-linecap="round"/>
-                <path d="M16 16c4.7 2.6 6.7 7.4 5.2 12" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" opacity=".85"/>
-                <path d="M16 16c-4.7-2.6-6.7-7.4-5.2-12" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" opacity=".85"/>
-                <circle cx="16" cy="16" r="2.35" fill="currentColor"/>
-                <circle cx="27.8" cy="19.6" r=".85" fill="currentColor"/>
-                <circle cx="4.2" cy="12.4" r=".85" fill="currentColor"/>
-                <circle cx="12.1" cy="28.1" r=".7" fill="currentColor"/>
-                <circle cx="19.9" cy="3.9" r=".7" fill="currentColor"/>
-              </svg>
-            </div>
             <h1 id="greeting">今天想聊点什么？</h1>
           </div>
           <div class="messages" id="messages" hidden></div>
