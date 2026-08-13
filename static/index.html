@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Grok</title>
+    <link rel="icon" href="/assets/favicon.svg?v=5" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&family=Noto+Serif+SC:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/styles/github.min.css" id="hl-light" />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/styles/github-dark.min.css"
+      id="hl-dark"
+      disabled
+    />
+    <link rel="stylesheet" href="/assets/styles.css?v=14" />
+    <style>
+      .drop-overlay,
+      #dropOverlay {
+        display: none !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app" id="app">
+      <div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-top">
+          <button class="brand" id="brandBtn" type="button" title="新对话">
+            <span class="mark" aria-hidden="true">
+              <svg viewBox="0 0 32 32" fill="none">
+                <path d="M16 16c5.2-1.4 9.8.2 12.4 4.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                <path d="M16 16c-5.2 1.4-9.8-.2-12.4-4.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                <path d="M16 16c1.8 5.1.1 10-4.4 12.6" stroke="currentColor" stroke-width="1.55" stroke-linecap="round"/>
+                <path d="M16 16c-1.8-5.1-.1-10 4.4-12.6" stroke="currentColor" stroke-width="1.55" stroke-linecap="round"/>
+                <path d="M16 16c4.7 2.6 6.7 7.4 5.2 12" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" opacity=".85"/>
+                <path d="M16 16c-4.7-2.6-6.7-7.4-5.2-12" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" opacity=".85"/>
+                <circle cx="16" cy="16" r="2.35" fill="currentColor"/>
+                <circle cx="27.8" cy="19.6" r=".85" fill="currentColor"/>
+                <circle cx="4.2" cy="12.4" r=".85" fill="currentColor"/>
+                <circle cx="12.1" cy="28.1" r=".7" fill="currentColor"/>
+                <circle cx="19.9" cy="3.9" r=".7" fill="currentColor"/>
+              </svg>
+            </span>
+            <span>Grok</span>
+          </button>
+          <button class="icon-btn mobile-only" id="closeSidebar" type="button" aria-label="关闭侧栏">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+
+        <button class="new-chat" id="newChat" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          新对话
+        </button>
+
+        <div class="search-wrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="11" cy="11" r="6.5" />
+            <path d="M16 16l5 5" />
+          </svg>
+          <input id="search" type="search" placeholder="搜索对话" autocomplete="off" />
+        </div>
+
+        <nav class="recents" id="recents"></nav>
+
+        <div class="sidebar-foot">
+          <button class="user-chip" id="openSettings" type="button">
+            <span class="avatar" id="avatar">G</span>
+            <span class="user-meta">
+              <span class="user-name" id="userName">Grok</span>
+              <span class="user-sub" id="userSub">本地对话</span>
+            </span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+              <circle cx="12" cy="12" r="3.2" />
+              <path d="M12 3.6v1.8M12 18.6v1.8M20.4 12h-1.8M5.4 12H3.6M17.9 6.1l-1.3 1.3M7.4 16.6l-1.3 1.3M17.9 17.9l-1.3-1.3M7.4 7.4L6.1 6.1" />
+            </svg>
+          </button>
+        </div>
+      </aside>
+
+      <main class="main welcome" id="main">
+        <header class="topbar">
+          <button class="icon-btn" id="openSidebar" type="button" aria-label="打开侧栏">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M4 7h16M4 12h16M4 17h16" />
+            </svg>
+          </button>
+          <div class="model-picker" id="modelPicker">
+            <button class="model-btn" id="modelBtn" type="button" aria-haspopup="listbox" aria-expanded="false">
+              <span id="modelLabel">Grok 4.6</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M7 9.5 12 14.5 17 9.5" />
+              </svg>
+            </button>
+            <div class="model-menu" id="modelMenu" hidden role="listbox"></div>
+          </div>
+          <div class="topbar-right">
+            <button class="ghost-btn" id="themeBtn" type="button">外观</button>
+          </div>
+        </header>
+
+        <div class="stage" id="stage">
+        <section class="thread" id="thread">
+          <div class="hero" id="hero">
+            <div class="hero-mark" aria-hidden="true">
+              <svg viewBox="0 0 32 32" fill="none">
+                <path d="M16 16c5.2-1.4 9.8.2 12.4 4.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                <path d="M16 16c-5.2 1.4-9.8-.2-12.4-4.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                <path d="M16 16c1.8 5.1.1 10-4.4 12.6" stroke="currentColor" stroke-width="1.55" stroke-linecap="round"/>
+                <path d="M16 16c-1.8-5.1-.1-10 4.4-12.6" stroke="currentColor" stroke-width="1.55" stroke-linecap="round"/>
+                <path d="M16 16c4.7 2.6 6.7 7.4 5.2 12" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" opacity=".85"/>
+                <path d="M16 16c-4.7-2.6-6.7-7.4-5.2-12" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" opacity=".85"/>
+                <circle cx="16" cy="16" r="2.35" fill="currentColor"/>
+                <circle cx="27.8" cy="19.6" r=".85" fill="currentColor"/>
+                <circle cx="4.2" cy="12.4" r=".85" fill="currentColor"/>
+                <circle cx="12.1" cy="28.1" r=".7" fill="currentColor"/>
+                <circle cx="19.9" cy="3.9" r=".7" fill="currentColor"/>
+              </svg>
+            </div>
+            <h1 id="greeting">今天想聊点什么？</h1>
+          </div>
+          <div class="messages" id="messages" hidden></div>
+        </section>
+
+        <div class="composer-dock">
+          <div class="composer" id="composer">
+            <div class="slash" id="slash" hidden></div>
+            <div class="mode-bar" id="modeBar" hidden></div>
+            <div class="chips" id="chips" hidden></div>
+            <div class="composer-row">
+              <button class="icon-btn attach" id="attachBtn" type="button" title="上传文件" aria-label="上传文件">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+              <textarea
+                id="input"
+                rows="1"
+                placeholder="问任何问题，或输入 / 选择模式"
+                enterkeyhint="send"
+              ></textarea>
+              <button class="send" id="sendBtn" type="button" disabled aria-label="发送">
+                <svg class="send-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 19V6M6.5 11.5 12 6l5.5 5.5" />
+                </svg>
+                <svg class="stop-icon" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="7" y="7" width="10" height="10" rx="1.6" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="starters" id="starters">
+            <button type="button" data-mode="research">深度研究</button>
+            <button type="button" data-mode="code">写代码</button>
+            <button type="button" data-mode="write">帮我写作</button>
+            <button type="button" data-mode="web">查一下网页</button>
+          </div>
+        </div>
+        </div>
+      </main>
+    </div>
+
+    <input id="fileInput" type="file" multiple hidden />
+
+    <dialog class="modal" id="settings">
+      <form method="dialog" class="modal-card">
+        <header>
+          <h2>设置</h2>
+          <button class="icon-btn" value="close" aria-label="关闭">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </header>
+        <div class="modal-body">
+          <div class="field">
+            <label>登录状态</label>
+            <p class="status-line" id="authStatus">检查中…</p>
+          </div>
+          <div class="field">
+            <label for="apiKey">可选：自定义 XAI_API_KEY</label>
+            <input id="apiKey" type="password" placeholder="留空则使用当前 Grok 登录" autocomplete="off" />
+            <p class="help">密钥只保存在本机 ~/.grok/web-chat/，不会进浏览器前端代码。</p>
+          </div>
+          <div class="actions">
+            <button type="button" class="ghost-btn" id="clearKey">清除自定义密钥</button>
+            <button type="button" class="primary-btn" id="saveKey">保存</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="cmdDialog">
+      <form method="dialog" class="modal-card">
+        <header>
+          <h2 id="cmdTitle">命令</h2>
+          <button class="icon-btn" value="close" aria-label="关闭">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </header>
+        <div class="modal-body" id="cmdBody"></div>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="renameDialog">
+      <form method="dialog" class="modal-card compact">
+        <header>
+          <h2>重命名对话</h2>
+        </header>
+        <div class="modal-body">
+          <input id="renameInput" type="text" maxlength="80" />
+          <div class="actions">
+            <button value="cancel" class="ghost-btn">取消</button>
+            <button value="ok" class="primary-btn" id="renameConfirm">保存</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.5/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/common.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js"></script>
+    <script src="/assets/app.js?v=14"></script>
+  </body>
+</html>
