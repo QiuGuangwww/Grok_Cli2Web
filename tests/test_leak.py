@@ -1,9 +1,13 @@
 import unittest
 
 from server import (
+    CrewState,
     attach_human_notes,
     close_crew_run,
+    decide_review,
     loop_detected,
+    machine_assigns,
+    next_recovery,
     open_crew_run,
     parse_ask,
     parse_feedback,
@@ -13,6 +17,7 @@ from server import (
     peek_guidance_ids,
     plan_waves,
     push_guidance,
+    recover_model,
     resolve_agent,
     strip_ask_json,
     take_guidance,
@@ -84,7 +89,38 @@ class LeakTests(unittest.TestCase):
     def test_parse_review_send_back(self):
         review = parse_review('{"pass":false,"issues":["缺评测"],"feedback":[{"to":"lead","ask":"补评测"}]}')
         self.assertFalse(review["pass"])
+        self.assertTrue(review["explicit_pass"])
         self.assertEqual(review["feedback"][0]["to"], "lead")
+        self.assertEqual(decide_review(review, "", 0), "rework")
+        self.assertEqual(decide_review(review, "", 2), "stop")
+        passed = parse_review('{"pass":true,"notes":"ok"}')
+        self.assertTrue(passed["explicit_pass"])
+        self.assertEqual(decide_review(passed, "", 0), "pass")
+        self.assertEqual(decide_review({"explicit_pass": False, "issues": [], "feedback": []}, "还有不足", 0), "rework")
+
+    def test_machine_assigns_and_phase(self):
+        roster = [{"id": "algo", "name": "算法", "role": "worker"}, {"id": "write", "name": "成文", "role": "worker"}]
+        review = {"feedback": [{"to": "algo", "ask": "补指标"}]}
+        assigns = machine_assigns(review, roster, {}, [])
+        self.assertEqual(assigns[0]["id"], "algo")
+        state = CrewState("r1")
+        snap = state.enter("reviewing", ["reviewer"])
+        self.assertEqual(snap["phase"], "reviewing")
+        state.mark_sent_back("algo")
+        stopped = state.stop("max-rework")
+        self.assertEqual(stopped["phase"], "stopped")
+        self.assertEqual(stopped["stop"], "max-rework")
+
+    def test_recovery_layers(self):
+        self.assertEqual(recover_model("grok-4.6"), "grok-4.5")
+        payload = {"model": "grok-4.6", "reasoning": {"effort": "high"}, "input": [{"role": "system", "content": "s"}, {"role": "user", "content": "task"}]}
+        first = next_recovery(payload, 0)
+        self.assertIn("重试", first["label"])
+        second = next_recovery(payload, 1)
+        self.assertEqual(second["payload"]["model"], "grok-4.5")
+        third = next_recovery(payload, 2)
+        self.assertIn("缩小", third["label"])
+        self.assertIsNone(next_recovery(payload, 3))
 
     def test_parse_rework_reuse(self):
         rework = parse_rework('{"rework":true,"reuse":["algo"],"assigns":[{"id":"algo","brief":"补指标"}]}')

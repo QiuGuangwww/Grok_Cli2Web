@@ -23,10 +23,10 @@ Listens on `127.0.0.1` only · chats stay on disk in `~/.grok/web-chat/`
 - Load Grok CLI history from `~/.grok/sessions/` and continue those chats here
 - `/` command menu: modes, export, usage, workflows, and more
 - Server-side tools: web search, X search, and code interpreter (tool stubs are stripped from the answer)
-- If a reply starts looping on “I’ll call / I’ll execute”, it is cut off and that turn is retried once
-- Inspect panel: process, team roster, and progress board; drag sidebars and the graph to resize
+- If a reply loops on “I’ll call / I’ll execute”, it is cut off and recovered in layers: retry, swap model, then shrink the task
+- Inspect panel for process and team; **View process** only appears when there is something to show
 - Settings split like Claude (account / multi-agent / appearance / language)
-- Themes, plus UI in 中文 / English / 日本語
+- Themes: light, paper, moss, **azure**; dark, midnight, dusk, **cyber**. UI in 中文 / English / 日本語
 
 ## Multi-agent
 
@@ -38,11 +38,13 @@ The slider is a **maximum** headcount (2–144), not a fixed roster. Lead and wo
   <img src="static/crew.svg" alt="Multi-agent flow: lead plans, specialists run in parallel, reviewer can send work back" width="720" />
 </p>
 
-- **Reviewer** can send work back. The lead decides whether another round is needed, and extra rounds reuse existing agents (at most two).
-- If the lead still cannot decide without guessing, it asks you in a `/`-style multiple choice. The last option is always **Other**.
-- Specialists must not invent missing facts. They route uncertainty to the right teammate (search, verify, compute, write, …).
-- While a run is live, click a worker in the **team list or the graph** and send a short note. It applies after that agent’s current turn.
-- The graph is Obsidian-style: green node = working, green edge = aligning, amber edge = feedback / send-back. Nodes can be dragged; nearby nodes slide out of the way.
+- A **server-side state machine** owns the run: who is running, who was sent back, and when to stop. Reviewer JSON is optional; missing output is decided in code.
+- Stall recovery is layered (retry → swap model → shrink the brief). After that the agent is marked partial and the crew continues. Review send-back is capped at two extra rounds.
+- **Reviewer** can send work back. Extra rounds reuse existing agents.
+- If the lead cannot decide without guessing, it asks you with a `/`-style multiple choice. The last option is always **Other**.
+- Specialists must not invent missing facts. They route uncertainty to the right teammate.
+- While a run is live, click a worker in the team list or the graph and type guidance. Stop marks every live agent as stopped; switching chats closes the team pane so it does not leak into another conversation.
+- Graph: green node = working, green edge = aligning, amber edge = feedback. Nodes can be dragged.
 
 ## Run
 

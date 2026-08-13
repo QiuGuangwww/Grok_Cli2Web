@@ -136,6 +136,44 @@ html[data-theme="dusk"] {
   --shadow-composer: 0 10px 28px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(244, 235, 232, 0.06);
 }
 
+html[data-theme="azure"] {
+  --bg: #f3f7fb;
+  --bg-sidebar: #e6eef6;
+  --bg-elevated: #fbfcfe;
+  --bg-hover: rgba(28, 48, 72, 0.045);
+  --bg-active: rgba(28, 48, 72, 0.075);
+  --text: #1a2430;
+  --text-muted: #5d6b7a;
+  --text-faint: #8b97a4;
+  --accent: #3d7eb8;
+  --accent-hover: #326ca0;
+  --accent-soft: #d7e6f3;
+  --border: rgba(28, 48, 72, 0.07);
+  --border-strong: rgba(28, 48, 72, 0.12);
+  --user-bubble: #e3ebf3;
+  --shadow: 0 16px 48px rgba(40, 64, 96, 0.07);
+  --shadow-composer: 0 10px 32px rgba(40, 64, 96, 0.07), 0 0 0 1px rgba(28, 48, 72, 0.05);
+}
+
+html[data-theme="cyber"] {
+  --bg: #090b10;
+  --bg-sidebar: #06070b;
+  --bg-elevated: #10141c;
+  --bg-hover: rgba(46, 230, 199, 0.07);
+  --bg-active: rgba(46, 230, 199, 0.12);
+  --text: #d8f7ff;
+  --text-muted: #7aa8b8;
+  --text-faint: #4e6d7a;
+  --accent: #2ee6c7;
+  --accent-hover: #55f0d4;
+  --accent-soft: #10332e;
+  --border: rgba(46, 230, 199, 0.1);
+  --border-strong: rgba(46, 230, 199, 0.2);
+  --user-bubble: #141a26;
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  --shadow-composer: 0 10px 28px rgba(0, 0, 0, 0.42), 0 0 0 1px rgba(46, 230, 199, 0.12);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -600,9 +638,12 @@ button {
 
 .agent-chip.waiting i,
 .agent-chip.queued i,
+.agent-chip.stopped i,
 .crew-chip.waiting i,
-.crew-chip.queued i {
+.crew-chip.queued i,
+.crew-chip.stopped i {
   background: var(--text-muted);
+  animation: none;
 }
 
 .agent-chip.done i,
@@ -2159,6 +2200,40 @@ input[type="range"]::-moz-range-progress {
 
 .tp-dusk .tp-bubble {
   background: #2c2228;
+}
+
+.tp-azure {
+  background: #f3f7fb;
+}
+
+.tp-azure .tp-side {
+  background: #e6eef6;
+}
+
+.tp-azure .tp-bar,
+.tp-azure .tp-line {
+  background: #c5d4e3;
+}
+
+.tp-azure .tp-bubble {
+  background: #e3ebf3;
+}
+
+.tp-cyber {
+  background: #090b10;
+}
+
+.tp-cyber .tp-side {
+  background: #06070b;
+}
+
+.tp-cyber .tp-bar,
+.tp-cyber .tp-line {
+  background: #1c3a38;
+}
+
+.tp-cyber .tp-bubble {
+  background: #141a26;
 }
 
 .agent-chip.blocked i,

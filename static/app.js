@@ -17,9 +17,11 @@ const THEMES = [
   { id: "light", key: "theme.light", dark: false },
   { id: "paper", key: "theme.paper", dark: false },
   { id: "moss", key: "theme.moss", dark: false },
+  { id: "azure", key: "theme.azure", dark: false },
   { id: "dark", key: "theme.dark", dark: true },
   { id: "midnight", key: "theme.midnight", dark: true },
   { id: "dusk", key: "theme.dusk", dark: true },
+  { id: "cyber", key: "theme.cyber", dark: true },
 ];
 
 const GREET = {
@@ -88,6 +90,19 @@ const I18N = {
     "inspect.code": "代码",
     "inspect.step": "步骤",
     "inspect.ledger": "进度板",
+    "inspect.phase": "状态机",
+    "phase.planning": "拆任务",
+    "phase.running": "专员工作中",
+    "phase.aligning": "步骤对齐",
+    "phase.reviewing": "审核中",
+    "phase.reworking": "打回重做",
+    "phase.asking": "等你选择",
+    "phase.synthesizing": "总控汇总",
+    "phase.done": "完成",
+    "phase.stopped": "已停止",
+    "phase.runningNow": "正在跑",
+    "phase.sentBack": "已打回",
+    "phase.stop": "停止原因",
     "inspect.task": "任务",
     "inspect.deps": "依赖",
     "inspect.depsOf": "基于 {names} 继续",
@@ -139,9 +154,11 @@ const I18N = {
     "theme.light": "浅色",
     "theme.paper": "素纸",
     "theme.moss": "松绿",
+    "theme.azure": "青空",
     "theme.dark": "深色",
     "theme.midnight": "午夜",
     "theme.dusk": "暮色",
+    "theme.cyber": "赛博",
     "theme.hint": "预览并选择外观。",
     "lang.label": "语言",
     cmd: "命令",
@@ -175,12 +192,15 @@ const I18N = {
     "agent.blocked": "对齐中",
     "agent.stepLead": "步骤总控",
     "agent.running": "工作中",
+    "agent.stopped": "已停止",
     "agent.writing": "汇总中",
     "agent.done": "完成",
     "agent.error": "失败",
     "agent.lead": "总控",
     "agent.worker": "子代理",
     "agent.reviewer": "审核",
+    "agent.sent_back": "已打回",
+    "agent.partial": "部分完成",
     "req.fail": "请求失败",
     "toast.saved": "已保存",
     "toast.fillKey": "请先输入 API 密钥。",
@@ -235,6 +255,19 @@ const I18N = {
     "inspect.code": "Code",
     "inspect.step": "Step",
     "inspect.ledger": "Progress board",
+    "inspect.phase": "State",
+    "phase.planning": "Planning",
+    "phase.running": "Workers running",
+    "phase.aligning": "Aligning",
+    "phase.reviewing": "Reviewing",
+    "phase.reworking": "Reworking",
+    "phase.asking": "Waiting on you",
+    "phase.synthesizing": "Synthesizing",
+    "phase.done": "Done",
+    "phase.stopped": "Stopped",
+    "phase.runningNow": "Running",
+    "phase.sentBack": "Sent back",
+    "phase.stop": "Stop reason",
     "inspect.task": "Task",
     "inspect.deps": "Depends on",
     "inspect.depsOf": "Continues from {names}",
@@ -286,9 +319,11 @@ const I18N = {
     "theme.light": "Light",
     "theme.paper": "Paper",
     "theme.moss": "Moss",
+    "theme.azure": "Azure",
     "theme.dark": "Dark",
     "theme.midnight": "Midnight",
     "theme.dusk": "Dusk",
+    "theme.cyber": "Cyber",
     "theme.hint": "Preview and choose an appearance.",
     "lang.label": "Language",
     cmd: "Commands",
@@ -322,12 +357,15 @@ const I18N = {
     "agent.blocked": "Aligning",
     "agent.stepLead": "Step lead",
     "agent.running": "Working",
+    "agent.stopped": "Stopped",
     "agent.writing": "Synthesizing",
     "agent.done": "Done",
     "agent.error": "Failed",
     "agent.lead": "Lead",
     "agent.worker": "Sub-agent",
     "agent.reviewer": "Reviewer",
+    "agent.sent_back": "Sent back",
+    "agent.partial": "Partial",
     "req.fail": "Request failed",
     "toast.saved": "Saved",
     "toast.fillKey": "Enter an API key first.",
@@ -382,6 +420,19 @@ const I18N = {
     "inspect.code": "コード",
     "inspect.step": "手順",
     "inspect.ledger": "進捗ボード",
+    "inspect.phase": "状態機械",
+    "phase.planning": "分割中",
+    "phase.running": "作業中",
+    "phase.aligning": "同期中",
+    "phase.reviewing": "レビュー中",
+    "phase.reworking": "差戻し",
+    "phase.asking": "選択待ち",
+    "phase.synthesizing": "まとめ中",
+    "phase.done": "完了",
+    "phase.stopped": "停止",
+    "phase.runningNow": "実行中",
+    "phase.sentBack": "差戻し",
+    "phase.stop": "停止理由",
     "inspect.task": "任務",
     "inspect.deps": "依存",
     "inspect.depsOf": "{names} を引き継いで続行",
@@ -433,9 +484,11 @@ const I18N = {
     "theme.light": "ライト",
     "theme.paper": "紙",
     "theme.moss": "モス",
+    "theme.azure": "青空",
     "theme.dark": "ダーク",
     "theme.midnight": "ミッドナイト",
     "theme.dusk": "黄昏",
+    "theme.cyber": "サイバー",
     "theme.hint": "外観をプレビューして選択します。",
     "lang.label": "言語",
     cmd: "コマンド",
@@ -469,12 +522,15 @@ const I18N = {
     "agent.blocked": "同期中",
     "agent.stepLead": "ステップリード",
     "agent.running": "作業中",
+    "agent.stopped": "停止",
     "agent.writing": "まとめ中",
     "agent.done": "完了",
     "agent.error": "失敗",
     "agent.lead": "リード",
     "agent.worker": "サブエージェント",
     "agent.reviewer": "レビュー",
+    "agent.sent_back": "差戻し",
+    "agent.partial": "一部完了",
     "req.fail": "リクエスト失敗",
     "toast.saved": "保存しました",
     "toast.fillKey": "先に API キーを入力してください。",
@@ -945,9 +1001,14 @@ async function regenerateMessage(id) {
 }
 
 function openInspect(id, agentId) {
+  const msg = (state.current?.messages || []).find((m) => m.id === id);
+  if (!msg) {
+    closeInspect();
+    return;
+  }
   closeThemePanel();
   state.inspectId = id;
-  if (agentId) state.inspectAgent = agentId;
+  state.inspectAgent = agentId || "";
   if (els.inspect) els.inspect.hidden = false;
   syncRightPane();
   renderInspect();
@@ -955,12 +1016,18 @@ function openInspect(id, agentId) {
 
 function closeInspect() {
   state.inspectId = null;
+  state.inspectAgent = "";
   state.inspectRosterKey = "";
   stopAgentGraph();
   if (els.inspect) els.inspect.hidden = true;
   if (els.inspectGraph) els.inspectGraph.hidden = true;
   if (els.gutterGraph) els.gutterGraph.hidden = true;
+  if (els.inspectGuide) els.inspectGuide.hidden = true;
   syncRightPane();
+}
+
+function messageInCurrent(id) {
+  return Boolean(id && (state.current?.messages || []).some((m) => m.id === id));
 }
 
 function agentLabel(status, role) {
@@ -991,13 +1058,45 @@ function findAgent(msg, id) {
   return (msg?.agents || []).find((a) => a.id === id);
 }
 
+const LIVE_AGENT = new Set(["running", "planning", "writing", "queued", "blocked", "waiting"]);
+
+function stopCrewMessage(msg) {
+  if (!msg) return;
+  msg.pending = false;
+  msg.status = t("agent.stopped");
+  if (msg.phase) {
+    msg.phase = { ...msg.phase, phase: "stopped", running: [], stop: "aborted" };
+  }
+  for (const agent of msg.agents || []) {
+    if (LIVE_AGENT.has(agent.status) || agent.status === "sent_back") {
+      agent.status = "stopped";
+    }
+  }
+}
+
+function visibleActivity(items) {
+  return (items || []).filter((item) => item && item.kind !== "think");
+}
+
+function hasInspectableProcess(msg) {
+  if (!msg) return false;
+  if (msg.pending) return true;
+  if ((msg.agents || []).length) return true;
+  if (visibleActivity(msg.activity).length) return true;
+  if ((msg.ledger || []).length) return true;
+  return false;
+}
+
 function crewStatus(msg) {
   const agents = msg?.agents || [];
+  if (agents.some((a) => a.status === "stopped") && !agents.some((a) => LIVE_AGENT.has(a.status))) {
+    return t("agent.stopped");
+  }
   const live = agents.filter((a) => ["running", "planning", "writing"].includes(a.status));
   if (live.length) return live.map((a) => `${a.name} · ${agentLabel(a.status)}`).join(" · ");
-  if (msg?.status) return msg.status;
   if (agents.length) return t("view.team");
-  return msg?.activity?.length ? t("view.process") : "";
+  if (visibleActivity(msg?.activity).length) return t("view.process");
+  return "";
 }
 
 function renderActivityCards(items) {
@@ -1121,21 +1220,36 @@ function agentChipHtml(a, selectedId) {
         </button>`;
 }
 
+function phaseCard(phase) {
+  if (!phase?.phase) return "";
+  const label = t(`phase.${phase.phase}`);
+  const lines = [label === `phase.${phase.phase}` ? phase.phase : label];
+  if (phase.running?.length) lines.push(`${t("phase.runningNow")}：${phase.running.join("、")}`);
+  if (phase.sent_back?.length) lines.push(`${t("phase.sentBack")}：${phase.sent_back.join("、")}`);
+  if (phase.stop && phase.phase === "stopped") lines.push(`${t("phase.stop")}：${phase.stop}`);
+  return `<div class="inspect-card"><span class="k">${t("inspect.phase")}</span>${lines
+    .map((line) => `<div class="ledger-line">${escapeHtml(line)}</div>`)
+    .join("")}</div>`;
+}
+
 function inspectDetailHtml(msg, selected) {
-  const ledger = msg?.ledger || [];
-  const ledgerHtml = ledger.length
-    ? `<div class="inspect-card"><span class="k">${t("inspect.ledger")}</span>${ledger
-        .map((entry) => `<div class="ledger-line"><b>${escapeHtml(entry.name || entry.id)}</b> ${escapeHtml(entry.note || "")}</div>`)
-        .join("")}</div>`
-    : "";
+  if (!msg) {
+    return `<div class="inspect-card"><span class="k">${t("inspect.status")}</span>${escapeHtml(t("inspect.empty"))}</div>`;
+  }
+  const ledger = msg.ledger || [];
+  const ledgerHtml =
+    phaseCard(msg.phase) +
+    (ledger.length
+      ? `<div class="inspect-card"><span class="k">${t("inspect.ledger")}</span>${ledger
+          .map((entry) => `<div class="ledger-line"><b>${escapeHtml(entry.name || entry.id)}</b> ${escapeHtml(entry.note || "")}</div>`)
+          .join("")}</div>`
+      : "");
   if (!selected) {
-    const items = msg?.activity || [];
-    return (
-      ledgerHtml +
-      (items.length
-        ? renderActivityCards(items)
-        : `<div class="inspect-card"><span class="k">${t("inspect.status")}</span>${escapeHtml(msg?.status || t("inspect.empty"))}</div>`)
-    );
+    const items = msg.activity || [];
+    const body = items.length
+      ? renderActivityCards(items)
+      : `<div class="inspect-card"><span class="k">${t("inspect.status")}</span>${escapeHtml(msg.status || t("inspect.empty"))}</div>`;
+    return ledgerHtml + body;
   }
   const model = selected.model || (selected.role === "lead" ? state.agentSettings.lead_model : state.agentSettings.worker_model);
   const effort = selected.effort || (selected.role === "lead" ? state.agentSettings.lead_effort : state.agentSettings.worker_effort);
@@ -1171,9 +1285,9 @@ function inspectDetailHtml(msg, selected) {
       ${
         selected.content
           ? `<div class="inspect-card inspect-output"><span class="k">${selected.role === "lead" && selected.status === "waiting" ? t("inspect.plan") : t("inspect.output")}</span><div class="md">${renderMarkdown(selected.content)}</div></div>`
-          : selected.status && selected.status !== "done"
-            ? `<div class="inspect-card"><span class="k">${t("inspect.status")}</span>${escapeHtml(agentLabel(selected.status, selected.role))}</div>`
-            : ""
+          : `<div class="inspect-card"><span class="k">${t("inspect.status")}</span>${escapeHtml(
+              agentLabel(selected.status, selected.role) || selected.note || t("inspect.empty")
+            )}</div>`
       }
     </div>`;
 }
@@ -1213,14 +1327,15 @@ function patchInspectRoster(agents, selectedId) {
 
 function renderInspect() {
   if (!els.inspectBody) return;
+  if (!state.inspectId || !messageInCurrent(state.inspectId)) {
+    closeInspect();
+    return;
+  }
   const msg = (state.current?.messages || []).find((m) => m.id === state.inspectId);
   const agents = msg?.agents || [];
   const title = $("inspectTitle");
-  if (title) title.textContent = agents.length ? t("inspect.team") : t("inspect.process");
-  if (agents.length && !agents.some((a) => a.id === state.inspectAgent)) {
-    state.inspectAgent = agents[0].id;
-  }
-  const selected = agents.find((a) => a.id === state.inspectAgent) || null;
+  if (title) title.textContent = agents.length && state.inspectAgent ? t("inspect.team") : t("inspect.process");
+  const selected = (state.inspectAgent && agents.find((a) => a.id === state.inspectAgent)) || null;
   const key = agents.map((a) => a.id).join("\0");
   const rosterRoot = els.inspectRoster;
   if (rosterRoot && state.inspectRosterKey === key && rosterRoot.querySelector(".agent-chip")) {
@@ -2062,7 +2177,7 @@ function renderMessages() {
         }
         const pending = m.pending && !m.content;
         const agents = m.agents || [];
-        const showProcess = m.status || pending || m.activity?.length || agents.length;
+        const showProcess = hasInspectableProcess(m);
         const crew = agents.length
           ? `<div class="crew">${agents
               .map(
@@ -2087,7 +2202,8 @@ function renderMessages() {
   if (state.stickToBottom !== false) {
     els.thread.scrollTop = els.thread.scrollHeight;
   }
-  if (state.inspectId) renderInspect();
+  if (state.inspectId && messageInCurrent(state.inspectId)) renderInspect();
+  else if (state.inspectId) closeInspect();
 }
 
 function syncSendButton() {
@@ -2118,6 +2234,9 @@ async function loadConversations() {
 }
 
 async function openConversation(id) {
+  if (state.sending) state.abort?.abort();
+  closeInspect();
+  closeAsk();
   if (!id) {
     state.current = null;
     renderMessages();
@@ -2128,7 +2247,6 @@ async function openConversation(id) {
   }
   const item = await api(`/api/conversations/${id}`);
   state.current = item;
-  closeInspect();
   closeThemePanel();
   if (item.model) setModel(item.model, false);
   renderMessages();
@@ -2138,6 +2256,7 @@ async function openConversation(id) {
 }
 
 async function newChat() {
+  if (state.sending) state.abort?.abort();
   state.current = null;
   closeAsk();
   closeInspect();
@@ -2240,6 +2359,7 @@ async function send() {
   syncSendButton();
   const controller = new AbortController();
   state.abort = controller;
+  let autoInspect = true;
 
   try {
     const res = await fetch("/api/chat", {
@@ -2274,17 +2394,25 @@ async function send() {
         const line = chunk.split("\n").find((l) => l.startsWith("data:"));
         if (!line) continue;
         const event = JSON.parse(line.slice(5).trim());
+        const live = messageInCurrent(tempAsst.id) || messageInCurrent(tempUser.id);
+        if (!live && event.type !== "start") continue;
         if (event.type === "crew-run") {
           state.crewRunId = event.run_id || null;
           if (state.inspectId) renderInspect();
         } else if (event.type === "start") {
           const prevId = tempAsst.id;
+          const stillHere = messageInCurrent(prevId) || messageInCurrent(tempUser.id);
           tempUser.id = event.user_message.id;
           tempUser.files = event.user_message.files || files;
           tempAsst.id = event.assistant_id;
+          if (!stillHere) continue;
           state.current.id = event.conversation.id;
           state.current.title = event.conversation.title;
           if (state.inspectId === prevId) state.inspectId = tempAsst.id;
+        } else if (event.type === "phase") {
+          tempAsst.phase = event;
+          const label = t(`phase.${event.phase}`);
+          tempAsst.status = label === `phase.${event.phase}` ? event.phase : label;
         } else if (event.type === "status") {
           tempAsst.status = event.text;
         } else if (event.type === "activity") {
@@ -2294,9 +2422,9 @@ async function send() {
           }
         } else if (event.type === "agent") {
           upsertAgent(tempAsst, event.agent);
-          if (!state.inspectId) {
-            state.inspectAgent = event.agent?.id || "lead";
-            openInspect(tempAsst.id, state.inspectAgent);
+          if (autoInspect && messageInCurrent(tempAsst.id)) {
+            autoInspect = false;
+            openInspect(tempAsst.id, event.agent?.id || "");
           }
         } else if (event.type === "agent-delta") {
           const agent = findAgent(tempAsst, event.agent_id) || { id: event.agent_id, content: "", activity: [] };
@@ -2348,27 +2476,27 @@ async function send() {
           if (event.agents?.length) tempAsst.agents = event.agents;
           if (event.ledger) tempAsst.ledger = event.ledger;
           if (event.links?.length) tempAsst.links = event.links;
-          if (event.ask) openAsk(event.ask);
+          if (event.ask && messageInCurrent(tempAsst.id)) openAsk(event.ask);
+          if (event.phase) tempAsst.phase = event.phase;
           if (!String(tempAsst.content || "").trim()) {
             tempAsst.error = tempAsst.error || t("inspect.empty");
           }
           tempAsst.status = tempAsst.agents?.length ? t("view.team") : tempAsst.activity?.length ? t("view.process") : "";
-          if (event.conversation) {
+          if (event.conversation && messageInCurrent(tempAsst.id)) {
             state.current.title = event.conversation.title;
             state.current.id = event.conversation.id;
           }
         }
-        renderMessages();
+        if (messageInCurrent(tempAsst.id)) renderMessages();
       }
     }
   } catch (err) {
-    if (err.name !== "AbortError") {
+    if (err.name === "AbortError") {
+      stopCrewMessage(tempAsst);
+    } else {
       tempAsst.error = err.message;
-    } else if (!tempAsst.content) {
-      tempAsst.error = "已停止";
+      tempAsst.pending = false;
     }
-    tempAsst.pending = false;
-    tempAsst.status = "";
     renderMessages();
   } finally {
     state.sending = false;
@@ -3172,7 +3300,7 @@ function bindEvents() {
   els.thread.addEventListener("click", async (e) => {
     const inspectBtn = e.target.closest("[data-inspect]");
     if (inspectBtn) {
-      openInspect(inspectBtn.dataset.inspect, inspectBtn.dataset.agent);
+      openInspect(inspectBtn.dataset.inspect, inspectBtn.dataset.agent || "");
       return;
     }
     const act = e.target.closest("[data-msg]");

@@ -98,6 +98,11 @@ NOLOOP_RULE = (
     "Call a real server-side tool now, or write the actual answer now."
 )
 
+SHRINK_RULE = (
+    "Your previous attempt stalled. Do a SMALLER job: one concrete result, at most 180 words. "
+    "No preamble. No 'I will'. If you cannot finish, write the partial facts you already have."
+)
+
 STALL_RE = re.compile(
     r"(?:"
     r"I(?:'ll| will)\s+(?:"
@@ -241,6 +246,49 @@ def noloop_payload(payload: dict[str, Any]) -> dict[str, Any]:
         inputs = [{"role": "system", "content": NOLOOP_RULE}, *inputs]
     nxt["input"] = inputs
     return nxt
+
+
+def recover_model(model: str) -> str | None:
+    table = {"grok-4.6": "grok-4.5", "grok-4.5": "grok-4.3", "grok-4.3": "grok-4.5"}
+    return table.get(model)
+
+
+def shrink_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    nxt = noloop_payload(payload)
+    inputs = []
+    for msg in nxt.get("input") or []:
+        if isinstance(msg, dict) and msg.get("role") == "system":
+            inputs.append({**msg, "content": f"{msg.get('content') or ''} {SHRINK_RULE}"})
+        elif isinstance(msg, dict) and msg.get("role") == "user":
+            body = str(msg.get("content") or "")
+            if len(body) > 1200:
+                body = body[:1200] + "\n…"
+            inputs.append({**msg, "content": f"{body}\n\nDo only the smallest next check. 180 words max."})
+        else:
+            inputs.append(msg)
+    nxt["input"] = inputs
+    return nxt
+
+
+def next_recovery(payload: dict[str, Any], restarts: int) -> dict[str, Any] | None:
+    if restarts >= 3:
+        return None
+    if restarts == 0:
+        return {"label": "检测到空转，已打断并重试", "payload": noloop_payload(payload)}
+    if restarts == 1:
+        model = str(payload.get("model") or "")
+        alt = recover_model(model)
+        nxt = noloop_payload({**payload, "model": alt or model})
+        if isinstance(nxt.get("reasoning"), dict):
+            nxt["reasoning"] = {"effort": _soften_effort(str(nxt["reasoning"].get("effort") or "medium"))}
+        return {"label": f"空转未消，换模型再试（{alt or model}）", "payload": nxt}
+    nxt = shrink_payload(payload)
+    alt = recover_model(str(payload.get("model") or ""))
+    if alt:
+        nxt["model"] = alt
+    if isinstance(nxt.get("reasoning"), dict):
+        nxt["reasoning"] = {"effort": "low"}
+    return {"label": "仍空转，缩小任务再试", "payload": nxt}
 
 
 def visible_answer(text: str) -> str:
@@ -1202,13 +1250,14 @@ async def xai_stream(token: str, payload: dict[str, Any], restarts: int = 0):
                             yield {"type": "activity", "entry": entry}
                 if stalled:
                     break
-    if stalled and restarts < 1:
-        yield {"type": "status", "text": "检测到空转，已打断并重试"}
-        yield {"type": "reset"}
-        async for ev in xai_stream(token, noloop_payload(payload), restarts=restarts + 1):
-            yield ev
-        return
     if stalled:
+        rec = next_recovery(payload, restarts)
+        if rec:
+            yield {"type": "status", "text": rec["label"]}
+            yield {"type": "reset"}
+            async for ev in xai_stream(token, rec["payload"], restarts=restarts + 1):
+                yield ev
+            return
         kept = trim_loop("".join(collected))
         yield {"type": "reset"}
         if kept:
@@ -1218,6 +1267,7 @@ async def xai_stream(token: str, payload: dict[str, Any], restarts: int = 0):
             "text": kept or "这一轮陷入空转，已停止。请再试一次。",
             "response_id": response_id,
             "activity": compact_activity(activity),
+            "stalled": True,
         }
         return
     full = visible_answer("".join(collected))
@@ -1428,6 +1478,7 @@ def parse_review(raw: str) -> dict[str, Any]:
     issues = data.get("issues") if isinstance(data.get("issues"), list) else []
     return {
         "pass": bool(passed) if passed is not None else not bool(issues),
+        "explicit_pass": passed is not None,
         "issues": [str(x)[:240] for x in issues[:8]],
         "feedback": parse_feedback(raw),
         "notes": str(data.get("notes") or data.get("summary") or "")[:500],
@@ -1464,6 +1515,101 @@ def parse_rework(raw: str) -> dict[str, Any]:
         "reuse": reuse,
         "assigns": assigns,
     }
+
+
+class CrewState:
+    def __init__(self, run_id: str):
+        self.run_id = run_id
+        self.phase = "planning"
+        self.running: set[str] = set()
+        self.sent_back: list[str] = []
+        self.failed: set[str] = set()
+        self.review_round = 0
+        self.max_review = 2
+        self.stop_reason: str | None = None
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "type": "phase",
+            "phase": self.phase,
+            "running": sorted(self.running),
+            "sent_back": list(self.sent_back)[-8:],
+            "failed": sorted(self.failed),
+            "review_round": self.review_round,
+            "stop": self.stop_reason,
+        }
+
+    def enter(self, phase: str, running: list[str] | None = None) -> dict[str, Any]:
+        self.phase = phase
+        self.running = set(running or [])
+        return self.snapshot()
+
+    def mark_sent_back(self, aid: str) -> None:
+        if aid and aid not in self.sent_back:
+            self.sent_back.append(aid)
+
+    def mark_failed(self, aid: str) -> None:
+        if aid:
+            self.failed.add(aid)
+
+    def stop(self, reason: str) -> dict[str, Any]:
+        self.phase = "done" if reason == "done" else "stopped"
+        self.running = set()
+        self.stop_reason = reason
+        return self.snapshot()
+
+
+def decide_review(review: dict[str, Any], raw: str, review_round: int, max_review: int = 2) -> str:
+    if review_round >= max_review:
+        return "stop"
+    if review.get("explicit_pass") is True and not review.get("issues") and not review.get("feedback"):
+        return "pass"
+    if review.get("explicit_pass") is False or review.get("issues") or review.get("feedback"):
+        return "rework"
+    blob = raw or ""
+    low = blob.lower()
+    if any(key in blob or key in low for key in ("打回", "不足", "缺口", "send back", "not ready", "missing", "incomplete", "不够")):
+        return "rework"
+    if any(key in blob or key in low for key in ("通过", "可以交", "足够", "lgtm", "looks good")):
+        return "pass"
+    return "pass"
+
+
+def machine_assigns(
+    review: dict[str, Any],
+    roster: list[dict[str, Any]],
+    completed: dict[str, dict[str, Any]],
+    sent_back: list[str],
+) -> list[dict[str, str]]:
+    assigns: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in review.get("feedback") or []:
+        target = resolve_agent(str(item.get("to") or ""), roster)
+        if not target or target.get("role") in {"lead", "reviewer"}:
+            continue
+        aid = str(target["id"])
+        if aid in seen:
+            continue
+        seen.add(aid)
+        assigns.append({"id": aid, "brief": str(item.get("ask") or "补齐审核指出的缺口，只写要点")[:400]})
+    if assigns:
+        return assigns[:4]
+    prefer = set(sent_back)
+    for spec in roster:
+        aid = str(spec.get("id") or "")
+        if not aid or spec.get("role") in {"lead", "reviewer"}:
+            continue
+        rec = completed.get(aid) or {}
+        if rec.get("status") in {"error", "partial"} or aid in prefer:
+            if aid not in seen:
+                seen.add(aid)
+                assigns.append({"id": aid, "brief": "只补最关键的缺口，不超过 180 字"})
+    if assigns:
+        return assigns[:3]
+    for spec in roster:
+        if spec.get("role") == "worker" and spec.get("id"):
+            return [{"id": str(spec["id"]), "brief": "用已有材料写一段最短结论，不要开新调研"}]
+    return []
 
 
 CREW_RUNS: dict[str, dict[str, Any]] = {}
@@ -1677,9 +1823,12 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
     worker_effort = cfg.get("worker_effort") or "medium"
     worker_count = clamp_workers(cfg.get("worker_count"), 3)
     run_id = open_crew_run()
+    machine = CrewState(run_id)
+    CREW_RUNS[run_id]["machine"] = machine
     human_lead_notes: list[str] = []
     running_ids: set[str] = set()
     yield {"type": "crew-run", "run_id": run_id}
+    yield machine.enter("planning", ["lead"])
 
     plan_effort = _soften_effort(lead_effort)
     yield {"type": "status", "text": "总控正在拆任务并对齐依赖…"}
@@ -1743,6 +1892,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
         plan_raw = ""
     plan_ask = parse_ask(plan_raw)
     if plan_ask:
+        yield machine.enter("asking", ["lead"])
         yield {"type": "status", "text": "总控需要你选一下方向"}
         yield {"type": "ask", "run_id": run_id, **plan_ask}
         choice = await wait_user_choice(run_id)
@@ -1854,6 +2004,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
         full = ""
         activity: list[dict[str, Any]] = []
         status = "done"
+        stalled = False
         model = str(payload.get("model") or worker_model)
         effort = ""
         if isinstance(payload.get("reasoning"), dict):
@@ -1875,12 +2026,17 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                 elif ev["type"] == "done":
                     full = ev.get("text") or full
                     activity = ev.get("activity") or activity
+                    if ev.get("stalled"):
+                        stalled = True
+                        status = "partial"
                 elif ev["type"] == "error":
                     status = "error"
                     full = ev.get("message") or "子代理失败"
         except Exception as exc:
             status = "error"
             full = full or f"子代理失败：{exc}"
+        if status in {"error", "partial"}:
+            machine.mark_failed(str(spec.get("id") or ""))
         result = _agent_view(spec, role=role, status=status, content=full, activity=activity, model=model, effort=effort)
         notes = parse_feedback(full)
         if notes:
@@ -2266,6 +2422,12 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
 
     for index, wave in enumerate(step_waves):
         names = [s["name"] for s in wave]
+        live_ids = []
+        for step in wave:
+            if step.get("lead_spec"):
+                live_ids.append(step["lead_spec"]["id"])
+            live_ids.extend(w["id"] for w in step.get("workers") or [])
+        yield machine.enter("running", live_ids)
         yield {"type": "status", "text": f"第 {index + 1}/{len(step_waves)} 波步骤并行：{'、'.join(names)}"}
         ledger_text, ledger_entries = pack_ledger(completed)
         yield {"type": "ledger", "wave": index + 1, "waves": len(step_waves), "text": ledger_text, "entries": ledger_entries}
@@ -2297,6 +2459,8 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
 
     review_notes = ""
     for review_round in range(3):
+        machine.review_round = review_round
+        yield machine.enter("reviewing", [str(reviewer_spec.get("id") or "reviewer")])
         yield {"type": "status", "text": "审核正在检查各步骤产出…" if review_round == 0 else f"第 {review_round} 轮返工后复审…"}
         yield {
             "type": "agent",
@@ -2341,7 +2505,8 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                 review_result = ev.get("result")
                 continue
             yield ev
-        review = parse_review(str((review_result or {}).get("content") or ""))
+        review_raw = str((review_result or {}).get("content") or "")
+        review = parse_review(review_raw)
         review_notes = review.get("notes") or review_notes
         for item in review.get("feedback") or []:
             target = resolve_agent(item["to"], roster_specs) or {
@@ -2352,74 +2517,18 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
             yield {"type": "link", **remember_link(reviewer_spec["id"], str(target.get("id") or "lead"), "review")}
             if target.get("id") and target.get("id") != "lead":
                 stash_ask(str(target["id"]), str(reviewer_spec.get("name") or "审核"), item["ask"])
-        if review.get("pass") and not review.get("issues") and not review.get("feedback"):
+                machine.mark_sent_back(str(target["id"]))
+        verdict = decide_review(review, review_raw, review_round, machine.max_review)
+        if verdict == "pass":
             yield {"type": "status", "text": "审核通过，交总控汇总"}
             break
-        yield {"type": "status", "text": "审核打回，总控判断是否再开一轮"}
-        yield {
-            "type": "link",
-            **remember_link(reviewer_spec["id"], "lead", "review"),
-        }
-        yield {
-            "type": "agent",
-            "agent": _agent_view(
-                {"id": "lead", "name": "总控", "brief": plan["lead"]},
-                role="lead",
-                status="writing",
-                model=lead_model,
-                effort=lead_effort,
-            ),
-        }
-        issue_lines = "\n".join(f"- {x}" for x in (review.get("issues") or review_notes or ["审核认为仍有不足"]))
-        decide_payload = {
-            "model": lead_model,
-            "stream": True,
-            "store": False,
-            "reasoning": {"effort": plan_effort},
-            "input": [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are the lead. The reviewer sent work back. Decide if another specialist round is needed. "
-                        "Reuse existing sub-agents whenever possible. Do not invent new roles unless none fit. "
-                        "Reply with ONLY control JSON: "
-                        '{"rework":true,"notes":"...","reuse":["algo"],"assigns":[{"id":"algo","brief":"..."}]} '
-                        'or {"rework":false,"notes":"缺口可在终稿里说明"}.'
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"User request:\n{brief}\nLead plan: {plan['lead']}\n"
-                        f"Reviewer notes:\n{issue_lines}\n"
-                        f"Reviewer feedback: {json.dumps(review.get('feedback') or [], ensure_ascii=False)}\n"
-                        f"Existing specialists: {specialist_directory()}\n"
-                        f"Progress ledger:\n{ledger_text}"
-                    ),
-                },
-            ],
-        }
-        decide_result = None
-        async for ev in iter_agent(
-            {"id": "lead", "name": "总控", "brief": plan["lead"], "step": "", "step_name": ""},
-            decide_payload,
-            "lead",
-        ):
-            if ev.get("type") == "_done":
-                decide_result = ev.get("result")
-                continue
-            yield ev
-        rework = parse_rework(str((decide_result or {}).get("content") or ""))
-        assigns = list(rework.get("assigns") or [])
-        if not assigns:
-            for item in review.get("feedback") or []:
-                target = resolve_agent(item["to"], roster_specs)
-                if target and target.get("role") not in {"lead", "reviewer", "step-lead"}:
-                    assigns.append({"id": str(target["id"]), "brief": item["ask"]})
-        decline = rework.get("explicit") and not rework.get("rework") and not rework.get("assigns")
-        if decline or (not assigns and not rework.get("rework")) or review_round >= 2:
-            yield {"type": "status", "text": "总控决定不再开一轮，转入汇总"}
+        if verdict == "stop":
+            yield machine.stop("max-rework")
+            yield {"type": "status", "text": "已达返工上限，转入汇总"}
             break
+        assigns = machine_assigns(review, roster_specs, completed, machine.sent_back)
+        yield {"type": "status", "text": "审核打回，状态机决定复用已有子代理"}
+        yield {"type": "link", **remember_link(reviewer_spec["id"], "lead", "review")}
         reused: list[dict[str, Any]] = []
         extra_by_id: dict[str, str] = {}
         for item in assigns[:4]:
@@ -2428,11 +2537,18 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                 continue
             extra_by_id[str(spec["id"])] = item.get("brief") or ""
             reused.append(spec)
+            machine.mark_sent_back(str(spec["id"]))
+            yield {
+                "type": "agent",
+                "agent": _agent_view(spec, role=spec.get("role") or "worker", status="sent_back"),
+            }
             yield {"type": "link", **remember_link("lead", str(spec["id"]), "rework")}
         if not reused:
+            yield machine.stop("no-assignee")
             yield {"type": "status", "text": "没有可复用的子代理，转入汇总"}
             break
         names = "、".join(spec["name"] for spec in reused)
+        yield machine.enter("reworking", [str(spec["id"]) for spec in reused])
         yield {"type": "status", "text": f"复用已有子代理再跑一轮：{names}"}
         by_step: dict[str, list[dict[str, Any]]] = {}
         for spec in reused:
@@ -2480,7 +2596,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                         {
                             "role": "user",
                             "content": (
-                                f"User request:\n{brief}\nRework notes: {rework.get('notes') or review_notes}\n"
+                                f"User request:\n{brief}\nRework notes: {review_notes}\n"
                                 f"Worker reports:\n{packed_step}"
                             ),
                         },
@@ -2499,6 +2615,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
     if lead_notes:
         human_lead_notes.extend(lead_notes)
 
+    yield machine.enter("synthesizing", ["lead"])
     yield {"type": "status", "text": "总控正在按进度板汇总…"}
     yield {
         "type": "agent",
@@ -2564,6 +2681,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
     synth_ask = parse_ask(lead_text)
     if synth_ask:
         lead_text = strip_ask_json(lead_text)
+        yield machine.enter("asking", ["lead"])
         yield {"type": "status", "text": "总控还不确定，需要你选一下"}
         yield {"type": "ask", "run_id": run_id, **synth_ask}
         choice = await wait_user_choice(run_id)
@@ -2641,6 +2759,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                 effort=reviewer_report.get("effort") or plan_effort,
             )
         )
+    yield machine.stop("done")
     yield {
         "type": "crew-done",
         "text": lead_text,
@@ -2723,6 +2842,7 @@ async def chat(body: ChatIn) -> StreamingResponse:
             crew_activity: list[dict[str, Any]] = []
             crew_ledger: list[dict[str, Any]] = []
             crew_links: list[dict[str, str]] = []
+            crew_phase: dict[str, Any] | None = None
             crew_run_id = ""
             response_id = None
             failed = ""
@@ -2744,6 +2864,8 @@ async def chat(body: ChatIn) -> StreamingResponse:
                             if cur.get("guidance") and aid in by_id:
                                 by_id[aid]["guidance"] = cur["guidance"]
                     else:
+                        if kind == "phase":
+                            crew_phase = ev
                         if kind == "link" and ev.get("from") and ev.get("to"):
                             crew_links.append({"from": str(ev["from"]), "to": str(ev["to"]), "kind": str(ev.get("kind") or "feedback")})
                         if kind == "guide" and ev.get("agent_id"):
@@ -2794,6 +2916,13 @@ async def chat(body: ChatIn) -> StreamingResponse:
 
             if not crew_agents:
                 crew_agents = list(crew_map.values())
+            if failed == "已停止":
+                live = {"running", "planning", "writing", "queued", "blocked", "waiting", "sent_back"}
+                crew_agents = [
+                    {**a, "status": "stopped"} if (a.get("status") or "") in live else a for a in crew_agents
+                ]
+                if crew_phase:
+                    crew_phase = {**crew_phase, "phase": "stopped", "running": [], "stop": "aborted"}
             if not crew_text:
                 lead = crew_map.get("lead") or {}
                 crew_text = str(lead.get("content") or "")
@@ -2819,6 +2948,10 @@ async def chat(body: ChatIn) -> StreamingResponse:
                         msg["ledger"] = crew_ledger
                     if crew_links:
                         msg["links"] = crew_links
+                    if crew_phase:
+                        msg["phase"] = crew_phase
+                    if failed == "已停止":
+                        msg["status"] = "已停止"
                     if failed and not crew_text:
                         msg["error"] = failed
                     break
@@ -2834,6 +2967,7 @@ async def chat(body: ChatIn) -> StreamingResponse:
                     "activity": crew_activity,
                     "ledger": crew_ledger,
                     "links": crew_links,
+                    "phase": crew_phase,
                     "conversation": public_conversation(latest),
                 }
             )
