@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&family=Noto+Serif+SC:wght@400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&family=Noto+Serif+SC:wght@400;500;600&family=Noto+Serif+JP:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" />
@@ -20,7 +20,7 @@
       id="hl-dark"
       disabled
     />
-    <link rel="stylesheet" href="/assets/styles.css?v=20" />
+    <link rel="stylesheet" href="/assets/styles.css?v=46" />
     <style>
       .drop-overlay,
       #dropOverlay {
@@ -35,13 +35,13 @@
       <div class="sidebar-backdrop" id="sidebarBackdrop" hidden></div>
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-top">
-          <button class="brand" id="brandBtn" type="button" title="新对话">
+          <button class="brand" id="brandBtn" type="button" data-i18n-title="newChat">
             <span class="mark" aria-hidden="true">
               <img src="/assets/grok-mark.svg" alt="" />
             </span>
-            <span>Grok</span>
+            <span data-i18n="brand">Grok</span>
           </button>
-          <button class="icon-btn mobile-only" id="closeSidebar" type="button" aria-label="关闭侧栏">
+          <button class="icon-btn mobile-only" id="closeSidebar" type="button" data-i18n-aria="aria.closeSidebar">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
               <path d="M6 6l12 12M18 6L6 18" />
             </svg>
@@ -52,7 +52,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
             <path d="M12 5v14M5 12h14" />
           </svg>
-          新对话
+          <span data-i18n="newChat">新对话</span>
         </button>
 
         <div class="search-wrap">
@@ -60,7 +60,7 @@
             <circle cx="11" cy="11" r="6.5" />
             <path d="M16 16l5 5" />
           </svg>
-          <input id="search" type="search" placeholder="搜索对话" autocomplete="off" />
+          <input id="search" type="search" data-i18n-placeholder="search.placeholder" placeholder="搜索对话" autocomplete="off" />
         </div>
 
         <nav class="recents" id="recents"></nav>
@@ -83,7 +83,7 @@
 
       <main class="main welcome" id="main">
         <header class="topbar">
-          <button class="icon-btn" id="openSidebar" type="button" aria-label="打开侧栏">
+          <button class="icon-btn" id="openSidebar" type="button" data-i18n-aria="aria.openSidebar">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
               <path d="M4 7h16M4 12h16M4 17h16" />
             </svg>
@@ -107,14 +107,15 @@
             <div class="model-menu" id="effortMenu" hidden role="listbox"></div>
           </div>
           <div class="topbar-right">
-            <button class="ghost-btn" id="themeBtn" type="button">外观</button>
+            <button class="ghost-btn" id="langBtn" type="button" title="中 / EN">中文</button>
+            <button class="ghost-btn" id="themeBtn" type="button" data-i18n="appearance">外观</button>
           </div>
         </header>
 
         <div class="stage" id="stage">
         <section class="thread" id="thread">
           <div class="hero" id="hero">
-            <h1 id="greeting">今天想聊点什么？</h1>
+            <h1 id="greeting" data-i18n="greeting.plain">今天想聊点什么？</h1>
           </div>
           <div class="messages" id="messages" hidden></div>
         </section>
@@ -122,21 +123,24 @@
         <div class="composer-dock">
           <div class="composer" id="composer">
             <div class="slash" id="slash" hidden></div>
-            <div class="mode-bar" id="modeBar" hidden></div>
             <div class="chips" id="chips" hidden></div>
             <div class="composer-row">
-              <button class="icon-btn attach" id="attachBtn" type="button" title="上传文件" aria-label="上传文件">
+              <button class="icon-btn attach" id="attachBtn" type="button" data-i18n-title="attach" data-i18n-aria="attach">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 5v14M5 12h14" />
                 </svg>
               </button>
-              <textarea
-                id="input"
-                rows="1"
-                placeholder="问任何问题，或输入 / 选择模式"
-                enterkeyhint="send"
-              ></textarea>
-              <button class="send" id="sendBtn" type="button" disabled aria-label="发送">
+              <div class="composer-field">
+                <span class="mode-chip" id="modeChip" hidden></span>
+                <textarea
+                  id="input"
+                  rows="1"
+                  data-i18n-placeholder="input.placeholder"
+                  placeholder="问任何问题，或输入 / 选择模式"
+                  enterkeyhint="send"
+                ></textarea>
+              </div>
+              <button class="send" id="sendBtn" type="button" disabled data-i18n-aria="send">
                 <svg class="send-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M12 19V6M6.5 11.5 12 6l5.5 5.5" />
                 </svg>
@@ -147,10 +151,11 @@
             </div>
           </div>
           <div class="starters" id="starters">
-            <button type="button" data-mode="research">深度研究</button>
-            <button type="button" data-mode="code">写代码</button>
-            <button type="button" data-mode="write">帮我写作</button>
-            <button type="button" data-mode="web">查一下网页</button>
+            <button type="button" data-mode="research" data-i18n="starter.research">深度研究</button>
+            <button type="button" data-mode="code" data-i18n="starter.code">写代码</button>
+            <button type="button" data-mode="write" data-i18n="starter.write">帮我写作</button>
+            <button type="button" data-mode="web" data-i18n="starter.web">查一下网页</button>
+            <button type="button" data-mode="multi" data-i18n="starter.multi">多 Agent</button>
           </div>
         </div>
         </div>
@@ -158,51 +163,172 @@
       <div class="gutter gutter-right" id="gutterRight" hidden role="separator" aria-orientation="vertical"></div>
       <aside class="inspect" id="inspect" hidden>
         <header class="inspect-head">
-          <h2>过程</h2>
-          <button class="icon-btn" id="closeInspect" type="button" aria-label="关闭">
+          <h2 id="inspectTitle" data-i18n="inspect.process">过程</h2>
+          <button class="icon-btn" id="closeInspect" type="button" data-i18n-aria="close">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
               <path d="M6 6l12 12M18 6L6 18" />
             </svg>
           </button>
         </header>
-        <div class="inspect-body" id="inspectBody"></div>
+        <div class="inspect-body" id="inspectBody">
+          <div id="inspectRoster"></div>
+          <div id="inspectDetail"></div>
+        </div>
+        <div class="inspect-guide" id="inspectGuide" hidden>
+          <div class="inspect-guide-head">
+            <span id="inspectGuideLabel"></span>
+          </div>
+          <div class="inspect-guide-row">
+            <textarea id="inspectGuideInput" rows="1"></textarea>
+            <button type="button" id="inspectGuideSend" data-i18n="inspect.guideSend">送出</button>
+          </div>
+          <p class="inspect-guide-hint" id="inspectGuideHint"></p>
+        </div>
+        <div class="gutter gutter-x" id="gutterGraph" hidden role="separator" aria-orientation="horizontal"></div>
+        <div class="inspect-graph" id="inspectGraph" hidden>
+          <div class="inspect-graph-head">
+            <p class="inspect-graph-label" data-i18n="inspect.graph">关系</p>
+            <div class="graph-legend">
+              <span class="gl gl-live" data-i18n="inspect.graphLive">工作中</span>
+              <span class="gl gl-link" data-i18n="inspect.graphLink">对齐中</span>
+              <span class="gl gl-ask" data-i18n="inspect.graphAsk">反馈</span>
+            </div>
+          </div>
+          <canvas id="agentGraph"></canvas>
+        </div>
+      </aside>
+      <aside class="theme-panel" id="themePanel" hidden>
+        <header class="inspect-head">
+          <h2 data-i18n="appearance">外观</h2>
+          <button class="icon-btn" id="closeTheme" type="button" data-i18n-aria="close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </header>
+        <div class="theme-body">
+          <p class="help" data-i18n="theme.hint">预览并选择外观。</p>
+          <div class="theme-grid" data-theme-grid></div>
+        </div>
       </aside>
     </div>
 
     <input id="fileInput" type="file" multiple hidden />
 
     <dialog class="modal" id="settings">
-      <form method="dialog" class="modal-card">
-        <header>
-          <h2>设置</h2>
-          <button class="icon-btn" value="close" aria-label="关闭">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <path d="M6 6l12 12M18 6L6 18" />
-            </svg>
-          </button>
-        </header>
-        <div class="modal-body">
-          <div class="field">
-            <label>登录状态</label>
-            <p class="status-line" id="authStatus">检查中…</p>
-          </div>
-          <div class="field">
-            <label for="apiKey">可选：自定义 XAI_API_KEY</label>
-            <input id="apiKey" type="password" placeholder="留空则使用当前 Grok 登录" autocomplete="off" />
-            <p class="help">密钥只保存在本机 ~/.grok/web-chat/，不会进浏览器前端代码。</p>
-          </div>
-          <div class="actions">
-            <button type="button" class="ghost-btn" id="clearKey">清除自定义密钥</button>
-            <button type="button" class="primary-btn" id="saveKey">保存</button>
+      <div class="settings-shell">
+        <aside class="settings-nav">
+          <p class="settings-kicker" data-i18n="settings">设置</p>
+          <button type="button" class="settings-tab active" data-set-tab="account" data-i18n="tab.account">账号</button>
+          <button type="button" class="settings-tab" data-set-tab="agents" data-i18n="tab.agents">多 Agent</button>
+          <button type="button" class="settings-tab" data-set-tab="appearance" data-i18n="tab.appearance">外观</button>
+          <button type="button" class="settings-tab" data-set-tab="language" data-i18n="tab.language">语言</button>
+        </aside>
+        <div class="settings-main">
+          <header>
+            <h2 id="settingsTitle" data-i18n="tab.account">账号</h2>
+            <button class="icon-btn" id="closeSettings" type="button" data-i18n-aria="close">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+          </header>
+          <div class="settings-scroll">
+            <section class="settings-pane" data-set-pane="account">
+              <div class="field">
+                <label data-i18n="auth.status">登录状态</label>
+                <p class="status-line" id="authStatus">检查中…</p>
+              </div>
+              <div class="field">
+                <label for="apiKey" data-i18n="auth.keyLabel">API 密钥（可选）</label>
+                <input id="apiKey" type="password" data-i18n-placeholder="auth.keyPh" placeholder="留空则沿用当前登录" autocomplete="off" />
+                <p class="help" data-i18n="auth.keyHelp">密钥仅保存在此设备，可用于覆盖当前登录。</p>
+              </div>
+              <div class="actions">
+                <button type="button" class="ghost-btn" id="clearKey" data-i18n="auth.clear">清除自定义密钥</button>
+                <button type="button" class="primary-btn" id="saveKey" data-i18n="auth.save">保存密钥</button>
+              </div>
+            </section>
+            <section class="settings-pane" data-set-pane="agents" hidden>
+              <div class="field">
+                <label data-i18n="agents.lead">总控模型</label>
+                <div class="pick-row">
+                  <div class="model-picker set-picker" id="leadModelPicker">
+                    <button class="model-btn" id="leadModelBtn" type="button">
+                      <span id="leadModelLabel">Grok 4.6</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 9.5 12 14.5 17 9.5" /></svg>
+                    </button>
+                    <div class="model-menu" id="leadModelMenu" hidden></div>
+                  </div>
+                  <div class="model-picker set-picker" id="leadEffortPicker">
+                    <button class="model-btn" id="leadEffortBtn" type="button">
+                      <span id="leadEffortLabel">High</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 9.5 12 14.5 17 9.5" /></svg>
+                    </button>
+                    <div class="model-menu" id="leadEffortMenu" hidden></div>
+                  </div>
+                </div>
+                <p class="help" data-i18n="agents.leadHelp">用于拆分任务并生成最终回答。</p>
+              </div>
+              <div class="field">
+                <label data-i18n="agents.worker">子代理模型</label>
+                <div class="pick-row">
+                  <div class="model-picker set-picker" id="workerModelPicker">
+                    <button class="model-btn" id="workerModelBtn" type="button">
+                      <span id="workerModelLabel">Grok 4.5</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 9.5 12 14.5 17 9.5" /></svg>
+                    </button>
+                    <div class="model-menu" id="workerModelMenu" hidden></div>
+                  </div>
+                  <div class="model-picker set-picker" id="workerEffortPicker">
+                    <button class="model-btn" id="workerEffortBtn" type="button">
+                      <span id="workerEffortLabel">Medium</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 9.5 12 14.5 17 9.5" /></svg>
+                    </button>
+                    <div class="model-menu" id="workerEffortMenu" hidden></div>
+                  </div>
+                </div>
+                <p class="help" data-i18n="agents.workerHelp">用于执行各项子任务。滑块是上限，实际人数按任务需要决定。</p>
+              </div>
+              <div class="field">
+                <div class="slider-head">
+                  <label for="workerCount" data-i18n="agents.count">子代理上限</label>
+                  <span id="workerCountVal">3</span>
+                </div>
+                <div class="slider-wrap">
+                  <input id="workerCount" type="range" min="2" max="144" step="1" value="3" />
+                </div>
+                <div class="slider-ticks"><span>2</span><span>144</span></div>
+                <div class="count-warn" id="workerCountWarn" hidden>
+                  <p id="workerCountWarnText"></p>
+                  <button type="button" id="workerCountSuggest" data-i18n="agents.warnUse8">改为 8</button>
+                </div>
+              </div>
+            </section>
+            <section class="settings-pane" data-set-pane="appearance" hidden>
+              <p class="help" data-i18n="theme.hint">预览并选择外观。</p>
+              <div class="theme-grid settings-theme-grid" data-theme-grid></div>
+            </section>
+            <section class="settings-pane" data-set-pane="language" hidden>
+              <div class="field">
+                <label data-i18n="lang.label">语言</label>
+                <div class="choice-row lang-choices">
+                  <button type="button" class="choice-btn" data-lang-set="zh">中文</button>
+                  <button type="button" class="choice-btn" data-lang-set="en">English</button>
+                  <button type="button" class="choice-btn" data-lang-set="ja">日本語</button>
+                </div>
+                <p class="help" data-i18n="lang.help">选择界面语言。</p>
+              </div>
+            </section>
           </div>
         </div>
-      </form>
+      </div>
     </dialog>
 
     <dialog class="modal" id="cmdDialog">
       <form method="dialog" class="modal-card">
         <header>
-          <h2 id="cmdTitle">命令</h2>
+          <h2 id="cmdTitle" data-i18n="cmd">命令</h2>
           <button class="icon-btn" value="close" aria-label="关闭">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
               <path d="M6 6l12 12M18 6L6 18" />
@@ -216,13 +342,13 @@
     <dialog class="modal" id="renameDialog">
       <form method="dialog" class="modal-card compact">
         <header>
-          <h2>重命名对话</h2>
+          <h2 data-i18n="rename.title">重命名对话</h2>
         </header>
         <div class="modal-body">
           <input id="renameInput" type="text" maxlength="80" />
           <div class="actions">
-            <button value="cancel" class="ghost-btn">取消</button>
-            <button value="ok" class="primary-btn" id="renameConfirm">保存</button>
+            <button value="cancel" class="ghost-btn" data-i18n="cancel">取消</button>
+            <button value="ok" class="primary-btn" id="renameConfirm" data-i18n="save">保存</button>
           </div>
         </div>
       </form>
@@ -232,6 +358,6 @@
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.5/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/common.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js"></script>
-    <script src="/assets/app.js?v=20"></script>
+    <script src="/assets/app.js?v=48"></script>
   </body>
 </html>

@@ -8,7 +8,7 @@ A local web UI for Grok, styled after Claude
 
 Listens on `127.0.0.1` only · chats stay on disk in `~/.grok/web-chat/`
 
-[Features](#features) · [Run](#run) · [Auth](#auth) · [`/web`](#grok-cli-web) · [Shortcuts](#shortcuts)
+[Features](#features) · [Multi-agent](#multi-agent) · [Run](#run) · [Auth](#auth) · [`/web`](#grok-cli-web)
 
 </div>
 
@@ -17,13 +17,41 @@ Listens on `127.0.0.1` only · chats stay on disk in `~/.grok/web-chat/`
 ## Features
 
 - Streaming replies with Markdown, tables, and KaTeX (`$...$` / `$$...$$`)
+- Modes in the composer (chat, research, web, think, code, write, **multi-agent**)
 - Copy on code blocks and tables; edit or regenerate messages
 - Upload, drag, or paste images and documents
 - Load Grok CLI history from `~/.grok/sessions/` and continue those chats here
 - `/` command menu: modes, export, usage, workflows, and more
 - Server-side tools: web search, X search, and code interpreter (tool stubs are stripped from the answer)
-- Click **Searching / View process** to see queries and pages in the right panel
-- Drag the sidebars to resize them
+- Inspect panel: process, team roster, and progress board; drag sidebars and the graph to resize
+- Settings split like Claude (account / multi-agent / appearance / language)
+- Themes, plus UI in 中文 / English / 日本語
+
+## Multi-agent
+
+Composer mode **Multi-agent**. The lead plans a few steps; independent steps run together. A step can have several specialists plus a step lead who aligns them. Later steps reuse the progress board instead of starting over.
+
+The slider is a **maximum** headcount (2–144), not a fixed roster. Lead and workers use separate models in settings.
+
+```mermaid
+flowchart TD
+  U[You] --> L[Lead plans steps]
+  L --> P[Independent steps in parallel]
+  P --> A[Step lead aligns workers]
+  A --> V[Reviewer]
+  V -->|pass| F[Lead writes the answer]
+  V -->|send back| D[Lead decides]
+  D -->|rework: reuse the same agents| P
+  D -->|good enough| F
+  W[Any specialist] -.->|don't guess: ask a teammate| P
+  U -.->|click a worker and type guidance| W
+```
+
+- **Reviewer** can send work back. The lead decides whether another round is needed, and extra rounds reuse existing agents (at most two).
+- If the lead still cannot decide without guessing, it asks you in a `/`-style multiple choice. The last option is always **Other**.
+- Specialists must not invent missing facts. They route uncertainty to the right teammate (search, verify, compute, write, …).
+- While a run is live, click a worker in the **team list or the graph** and send a short note. It applies after that agent’s current turn.
+- The graph is Obsidian-style: green node = working, green edge = aligning, amber edge = feedback / send-back. Nodes can be dragged; nearby nodes slide out of the way.
 
 ## Run
 
