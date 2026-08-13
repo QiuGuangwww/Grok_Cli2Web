@@ -20,7 +20,7 @@
       id="hl-dark"
       disabled
     />
-    <link rel="stylesheet" href="/assets/styles.css?v=19" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20" />
     <style>
       .drop-overlay,
       #dropOverlay {
@@ -96,6 +96,15 @@
               </svg>
             </button>
             <div class="model-menu" id="modelMenu" hidden role="listbox"></div>
+          </div>
+          <div class="model-picker" id="effortPicker">
+            <button class="model-btn" id="effortBtn" type="button" aria-haspopup="listbox" aria-expanded="false">
+              <span id="effortLabel">High</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M7 9.5 12 14.5 17 9.5" />
+              </svg>
+            </button>
+            <div class="model-menu" id="effortMenu" hidden role="listbox"></div>
           </div>
           <div class="topbar-right">
             <button class="ghost-btn" id="themeBtn" type="button">外观</button>
@@ -223,6 +232,6 @@
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.5/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/common.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js"></script>
-    <script src="/assets/app.js?v=16"></script>
+    <script src="/assets/app.js?v=20"></script>
   </body>
 </html>

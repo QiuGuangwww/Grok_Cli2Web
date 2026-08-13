@@ -621,6 +621,7 @@ class ChatIn(BaseModel):
     model: str = "grok-4.6"
     web_search: bool = False
     mode: str = "chat"
+    effort: str = "high"
 
 
 class ConversationPatch(BaseModel):
@@ -876,6 +877,9 @@ async def chat(body: ChatIn) -> StreamingResponse:
         raise HTTPException(400, "请输入内容或上传文件")
 
     model = (body.model or "grok-4.6").strip() or "grok-4.6"
+    effort = (body.effort or "high").strip().lower()
+    if effort not in {"low", "medium", "high", "xhigh"}:
+        effort = "high"
     if body.conversation_id:
         convo = get_conversation(body.conversation_id)
     else:
@@ -924,6 +928,7 @@ async def chat(body: ChatIn) -> StreamingResponse:
         "stream": True,
         "store": True,
         "tools": list(DEFAULT_TOOLS),
+        "reasoning": {"effort": effort},
         "input": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},

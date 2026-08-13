@@ -6,6 +6,13 @@ const MODELS = [
   { id: "grok-4.3", name: "Grok 4.3", desc: "超长上下文，适合大文档" },
 ];
 
+const EFFORTS = [
+  { id: "low", name: "Low", desc: "更快，适合简单问题和工具调用" },
+  { id: "medium", name: "Medium", desc: "更均衡，适合分析和长上下文" },
+  { id: "high", name: "High", desc: "默认。更深，适合难题和多步推理" },
+  { id: "xhigh", name: "Extra high", desc: "最深，更慢，适合最难的问题" },
+];
+
 const MODE_IDS = new Set(["research", "web", "think", "code", "write", "chat"]);
 
 const SLASH = [
@@ -30,7 +37,7 @@ const SLASH = [
   { id: "session-info", name: "会话信息", desc: "模型、轮次和来源", icon: "ℹ", group: "会话", aliases: ["status", "info"] },
 
   { id: "model", name: "切换模型", desc: "打开模型选择器", icon: "◆", group: "模型", aliases: ["m"] },
-  { id: "effort", name: "推理强度", desc: "网页里由模型自己把握；可切到深度思考", icon: "▲", group: "模型" },
+  { id: "effort", name: "推理强度", desc: "Low / Medium / High / Extra high", icon: "▲", group: "模型" },
 
   { id: "workflow", name: "运行工作流", desc: "查看并启动本机 .rhai 工作流", icon: "▷", group: "工作流" },
   { id: "workflows", name: "工作流面板", desc: "列出已保存的 workflow", icon: "☰", group: "工作流" },
@@ -72,6 +79,7 @@ const state = {
   sending: false,
   abort: null,
   model: localStorage.getItem("grok-model") || "grok-4.6",
+  effort: localStorage.getItem("grok-effort") || "high",
   mode: localStorage.getItem("grok-mode") || "chat",
   slashOpen: false,
   slashIndex: 0,
@@ -100,6 +108,10 @@ const els = {
   modelLabel: $("modelLabel"),
   modelMenu: $("modelMenu"),
   modelPicker: $("modelPicker"),
+  effortBtn: $("effortBtn"),
+  effortLabel: $("effortLabel"),
+  effortMenu: $("effortMenu"),
+  effortPicker: $("effortPicker"),
   composer: $("composer"),
   settings: $("settings"),
   slash: $("slash"),
@@ -695,6 +707,7 @@ async function send() {
         message: text,
         file_ids: files.map((f) => f.id),
         model: state.model,
+        effort: state.effort,
         mode: state.mode,
         web_search: state.mode === "web" || state.mode === "research",
       }),
@@ -904,8 +917,13 @@ async function runSlash(item, arg = "") {
     return;
   }
   if (id === "effort") {
-    setMode("think");
-    toast("已切到深度思考");
+    const level = (arg || "").trim().toLowerCase().replace("extra high", "xhigh").replace("x-high", "xhigh");
+    if (EFFORTS.some((e) => e.id === level)) {
+      setEffort(level);
+      toast(`推理强度：${currentEffort().name}`);
+    } else {
+      openEffortMenu();
+    }
     return;
   }
   if (id === "theme") {
@@ -992,6 +1010,10 @@ function currentModel() {
   return MODELS.find((m) => m.id === state.model) || MODELS[0];
 }
 
+function currentEffort() {
+  return EFFORTS.find((e) => e.id === state.effort) || EFFORTS[2];
+}
+
 function renderModelMenu() {
   els.modelLabel.textContent = currentModel().name;
   els.modelMenu.innerHTML = MODELS.map(
@@ -1021,6 +1043,39 @@ function closeModelMenu() {
   els.modelMenu.hidden = true;
   els.modelPicker.classList.remove("open");
   els.modelBtn.setAttribute("aria-expanded", "false");
+}
+
+function renderEffortMenu() {
+  if (els.effortLabel) els.effortLabel.textContent = currentEffort().name;
+  if (!els.effortMenu) return;
+  els.effortMenu.innerHTML = EFFORTS.map(
+    (e) => `<button type="button" class="model-option ${e.id === state.effort ? "active" : ""}" data-effort="${e.id}" role="option">
+      <span><span class="name">${escapeHtml(e.name)}</span><span class="desc">${escapeHtml(e.desc)}</span></span>
+      <span class="check">${e.id === state.effort ? "✓" : ""}</span>
+    </button>`
+  ).join("");
+}
+
+function setEffort(id, persist = true) {
+  if (!EFFORTS.some((e) => e.id === id)) return;
+  state.effort = id;
+  if (persist) localStorage.setItem("grok-effort", id);
+  renderEffortMenu();
+  closeEffortMenu();
+}
+
+function openEffortMenu() {
+  renderEffortMenu();
+  els.effortMenu.hidden = false;
+  els.effortPicker.classList.add("open");
+  els.effortBtn.setAttribute("aria-expanded", "true");
+}
+
+function closeEffortMenu() {
+  if (!els.effortMenu) return;
+  els.effortMenu.hidden = true;
+  els.effortPicker?.classList.remove("open");
+  els.effortBtn?.setAttribute("aria-expanded", "false");
 }
 
 function hideSlash() {
@@ -1137,15 +1192,27 @@ function bindEvents() {
   document.addEventListener("click", (e) => {
     if (!e.target.closest(".menu") && !e.target.closest(".conv-menu")) closeMenu();
     if (!e.target.closest("#modelPicker")) closeModelMenu();
+    if (!e.target.closest("#effortPicker")) closeEffortMenu();
   });
   els.modelBtn.addEventListener("click", (e) => {
     e.stopPropagation();
+    closeEffortMenu();
     if (els.modelMenu.hidden) openModelMenu();
     else closeModelMenu();
   });
   els.modelMenu.addEventListener("click", (e) => {
     const id = e.target.closest("[data-model]")?.dataset.model;
     if (id) setModel(id);
+  });
+  els.effortBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    closeModelMenu();
+    if (els.effortMenu.hidden) openEffortMenu();
+    else closeEffortMenu();
+  });
+  els.effortMenu?.addEventListener("click", (e) => {
+    const id = e.target.closest("[data-effort]")?.dataset.effort;
+    if (id) setEffort(id);
   });
   els.search.addEventListener("input", renderRecents);
   els.input.addEventListener("input", () => {
@@ -1341,6 +1408,7 @@ async function init() {
   bindGutter(els.gutterRight, "right");
   $("closeInspect")?.addEventListener("click", closeInspect);
   renderModelMenu();
+  renderEffortMenu();
   renderModeBar();
   syncSendButton();
   await refreshHealth();
