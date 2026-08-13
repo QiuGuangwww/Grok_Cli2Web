@@ -2,7 +2,7 @@
 
 <img src="static/grok-mark.svg" width="72" alt="Grok" />
 
-# Grok Chat
+# Grok-Cli2Web
 
 A local web UI for Grok, styled after Claude
 
