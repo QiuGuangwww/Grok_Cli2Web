@@ -23,6 +23,7 @@ Listens on `127.0.0.1` only · chats stay on disk in `~/.grok/web-chat/`
 - Load Grok CLI history from `~/.grok/sessions/` and continue those chats here
 - `/` command menu: modes, export, usage, workflows, and more
 - Server-side tools: web search, X search, and code interpreter (tool stubs are stripped from the answer)
+- If a reply starts looping on “I’ll call / I’ll execute”, it is cut off and that turn is retried once
 - Inspect panel: process, team roster, and progress board; drag sidebars and the graph to resize
 - Settings split like Claude (account / multi-agent / appearance / language)
 - Themes, plus UI in 中文 / English / 日本語
@@ -33,19 +34,9 @@ Composer mode **Multi-agent**. The lead plans a few steps; independent steps run
 
 The slider is a **maximum** headcount (2–144), not a fixed roster. Lead and workers use separate models in settings.
 
-```mermaid
-flowchart TD
-  U[You] --> L[Lead plans steps]
-  L --> P[Independent steps in parallel]
-  P --> A[Step lead aligns workers]
-  A --> V[Reviewer]
-  V -->|pass| F[Lead writes the answer]
-  V -->|send back| D[Lead decides]
-  D -->|rework: reuse the same agents| P
-  D -->|good enough| F
-  W[Any specialist] -.->|don't guess: ask a teammate| P
-  U -.->|click a worker and type guidance| W
-```
+<p align="center">
+  <img src="static/crew.svg" alt="Multi-agent flow: lead plans, specialists run in parallel, reviewer can send work back" width="720" />
+</p>
 
 - **Reviewer** can send work back. The lead decides whether another round is needed, and extra rounds reuse existing agents (at most two).
 - If the lead still cannot decide without guessing, it asks you in a `/`-style multiple choice. The last option is always **Other**.

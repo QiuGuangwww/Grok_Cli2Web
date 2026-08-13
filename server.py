@@ -2755,6 +2755,14 @@ async def chat(body: ChatIn) -> StreamingResponse:
                             aid = str(agent.get("id") or "")
                             if aid:
                                 crew_map[aid] = {**crew_map.get(aid, {}), **agent}
+                        elif kind == "reset":
+                            if "lead" in crew_map:
+                                crew_map["lead"]["content"] = ""
+                        elif kind == "agent-reset":
+                            aid = str(ev.get("agent_id") or "")
+                            if aid:
+                                cur = crew_map.setdefault(aid, {"id": aid, "content": ""})
+                                cur["content"] = ""
                         elif kind == "agent-delta":
                             aid = str(ev.get("agent_id") or "")
                             if aid:
