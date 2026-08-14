@@ -32,7 +32,7 @@
 
   <rect x="236" y="70" width="408" height="70" rx="14" fill="#f4e4d6" stroke="#c96442"/>
   <text x="440" y="98" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="15" fill="#1c1915">Brain</text>
-  <text x="440" y="118" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#6b645a">plan vN · fact contract · arbitrate · merge · score</text>
+  <text x="440" y="118" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#6b645a">plan vN · contract · verify · disputed · score · budget</text>
   <text x="440" y="132" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#8a8478">goal is pinned · later agents never see full essays</text>
 
   <path d="M440 140v20" stroke="#8a8478" stroke-width="1.4" marker-end="url(#arr)"/>
@@ -52,7 +52,7 @@
   <path d="M456 216h16" stroke="#3a8f5e" stroke-width="1.5" marker-end="url(#arr-live)"/>
 
   <rect x="136" y="248" width="604" height="32" rx="8" fill="#fff" stroke="#d9d2c6"/>
-  <text x="438" y="269" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="12" fill="#1c1915">Filtered contract · claim / source / confidence · Brain settles conflicts</text>
+  <text x="438" y="269" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="12" fill="#1c1915">Contract · contested → verify once · equally sourced split → disputed</text>
 
   <text x="438" y="288" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#c48432">don’t guess · ask a teammate · similar asks are merged</text>
 
@@ -87,7 +87,7 @@
   <text x="824" y="334" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#c96442">same agents</text>
   <text x="824" y="350" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#c96442">new premises</text>
 
-  <text x="440" y="468" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="12" fill="#6b645a">Ties are contested, not guessed. Human steer updates Brain so the next schedule is not the old plan.</text>
+  <text x="440" y="468" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="12" fill="#6b645a">A documented split is a fact. Report both sides — do not keep verifying. Steer writes back to Brain.</text>
 
   <rect x="128" y="488" width="624" height="48" rx="12" fill="#fff" stroke="#e8e2d6"/>
   <text x="440" y="508" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="12" fill="#1c1915">Inspect · live graph · guidance box</text>
