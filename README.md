@@ -69,7 +69,7 @@ Python 3.13+ is required (Homebrew Python 3.14 `venv` is flaky on some machines)
 ### Windows
 
 ```powershell
-git clone https://github.com/mohui666/Grok_Cli2Web.git
+git clone https://github.com/QiuGuangwww/Grok_Cli2Web.git
 cd Grok_Cli2Web
 .\launch.cmd
 ```
