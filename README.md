@@ -20,7 +20,7 @@ Listens on `127.0.0.1` only · chats stay on disk in `~/.grok/web-chat/`
 - Modes in the composer (chat, research, web, think, code, write, **multi-agent**)
 - Copy on code blocks and tables; edit or regenerate messages
 - Upload, drag, or paste images and documents
-- Load Grok CLI history from `~/.grok/sessions/` and continue those chats here
+- Load Grok CLI history from `~/.grok/sessions/` as **read-only** (web chats stay in `~/.grok/web-chat/`)
 - `/` command menu: modes, export, usage, workflows, and more
 - Server-side tools: web search, X search, and code interpreter (tool stubs are stripped from the answer)
 - If a reply loops on “I’ll call / I’ll execute”, it is cut off and recovered in layers: retry, swap model, then shrink the task

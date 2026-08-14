@@ -1164,6 +1164,10 @@ html[data-scheme="dark"] .primary-btn {
   display: none;
 }
 
+.main.cli-readonly .composer-dock {
+  display: none;
+}
+
 .hero {
   max-width: 760px;
   width: 100%;

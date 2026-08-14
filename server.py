@@ -30,7 +30,6 @@ ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 DATA_DIR = Path.home() / ".grok" / "web-chat"
 UPLOADS = DATA_DIR / "uploads"
-CONTINUATIONS = DATA_DIR / "cli_continuations"
 CONV_PATH = DATA_DIR / "conversations.json"
 SETTINGS_PATH = DATA_DIR / "settings.json"
 AUTH_PATH = Path.home() / ".grok" / "auth.json"
@@ -44,7 +43,6 @@ log = logging.getLogger("grok-chat")
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 UPLOADS.mkdir(parents=True, exist_ok=True)
-CONTINUATIONS.mkdir(parents=True, exist_ok=True)
 
 MODE_PROMPTS = {
     "chat": (
@@ -755,18 +753,18 @@ def list_cli_summaries() -> list[dict[str, Any]]:
         info = data.get("info") or {}
         sid = info.get("id") or summary.parent.name
         title = data.get("generated_title") or data.get("session_summary") or "CLI 对话"
-        cont = read_json(CONTINUATIONS / f"{sid}.json", {})
         items.append(
             {
                 "id": f"cli:{sid}",
-                "title": cont.get("title") or title,
+                "title": title,
                 "created_at": data.get("created_at"),
-                "updated_at": cont.get("updated_at") or data.get("updated_at") or data.get("last_active_at"),
-                "model": cont.get("model") or data.get("current_model_id") or "grok-4.6",
+                "updated_at": data.get("updated_at") or data.get("last_active_at"),
+                "model": data.get("current_model_id") or "grok-4.6",
                 "preview": (data.get("last_turn_summary") or title or "")[:80],
                 "message_count": data.get("num_chat_messages") or data.get("num_messages") or 0,
                 "source": "cli",
                 "cwd": info.get("cwd"),
+                "readonly": True,
             }
         )
     return items
@@ -786,20 +784,19 @@ def get_conversation(cid: str) -> dict[str, Any]:
         folder = find_cli_dir(sid)
         summary = read_json(folder / "summary.json", {})
         info = summary.get("info") or {}
-        cont = read_json(CONTINUATIONS / f"{sid}.json", {})
         cli_messages = parse_cli_messages(folder)
-        extra = cont.get("messages") or []
-        title = cont.get("title") or summary.get("generated_title") or summary.get("session_summary") or "CLI 对话"
+        title = summary.get("generated_title") or summary.get("session_summary") or "CLI 对话"
         return {
             "id": cid,
             "title": title,
             "created_at": summary.get("created_at"),
-            "updated_at": cont.get("updated_at") or summary.get("updated_at") or summary.get("last_active_at"),
-            "model": cont.get("model") or summary.get("current_model_id") or "grok-4.6",
-            "previous_response_id": cont.get("previous_response_id"),
-            "messages": cli_messages + extra,
+            "updated_at": summary.get("updated_at") or summary.get("last_active_at"),
+            "model": summary.get("current_model_id") or "grok-4.6",
+            "previous_response_id": None,
+            "messages": cli_messages,
             "source": "cli",
             "cwd": info.get("cwd"),
+            "readonly": True,
         }
     item = get_web_conversation(cid)
     if not item:
@@ -807,22 +804,13 @@ def get_conversation(cid: str) -> dict[str, Any]:
     return item
 
 
+def reject_cli_write(cid: str | None) -> None:
+    if is_cli_id(cid):
+        raise HTTPException(400, "CLI 对话只读。网页在 ~/.grok/web-chat，CLI 在 ~/.grok/sessions，请在 Grok CLI 里继续。")
+
+
 def upsert_conversation(updated: dict[str, Any]) -> dict[str, Any]:
-    if is_cli_id(updated.get("id")):
-        sid = cli_sid(updated["id"])
-        extra = [m for m in (updated.get("messages") or []) if m.get("source") != "cli"]
-        write_json(
-            CONTINUATIONS / f"{sid}.json",
-            {
-                "id": updated["id"],
-                "title": updated.get("title"),
-                "previous_response_id": updated.get("previous_response_id"),
-                "model": updated.get("model"),
-                "messages": extra,
-                "updated_at": updated.get("updated_at") or now_iso(),
-            },
-        )
-        return updated
+    reject_cli_write(updated.get("id"))
     items = load_conversations()
     found = False
     for i, item in enumerate(items):
@@ -1159,6 +1147,7 @@ async def read_conversation(cid: str) -> dict[str, Any]:
 
 @app.patch("/api/conversations/{cid}")
 async def patch_conversation(cid: str, body: ConversationPatch) -> dict[str, Any]:
+    reject_cli_write(cid)
     item = get_conversation(cid)
     if body.title is not None:
         title = body.title.strip() or "新对话"
@@ -1180,11 +1169,7 @@ async def patch_conversation(cid: str, body: ConversationPatch) -> dict[str, Any
 
 @app.delete("/api/conversations/{cid}")
 async def delete_conversation(cid: str) -> dict[str, Any]:
-    if is_cli_id(cid):
-        path = CONTINUATIONS / f"{cli_sid(cid)}.json"
-        if path.exists():
-            path.unlink()
-        return {"ok": True, "kept_cli": True}
+    reject_cli_write(cid)
     items = [x for x in load_conversations() if x["id"] != cid]
     save_conversations(items)
     return {"ok": True}
@@ -3762,6 +3747,7 @@ async def chat(body: ChatIn) -> StreamingResponse:
     if effort not in {"low", "medium", "high", "xhigh"}:
         effort = "high"
     if body.conversation_id:
+        reject_cli_write(body.conversation_id)
         convo = get_conversation(body.conversation_id)
     else:
         convo = {
