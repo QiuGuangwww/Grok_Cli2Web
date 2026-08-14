@@ -4,9 +4,21 @@ from server import (
     CrewState,
     apply_user_choice,
     arbitrate_conflicts,
+    both_solid,
+    budget_policy,
+    promote_remaining_contested,
+    clamp_budget,
+    estimate_usage,
+    format_budget,
+    parse_usage,
     attach_human_notes,
+    can_see_contested,
     collect_merged_ask,
     commit_facts,
+    contested_items,
+    format_contested,
+    is_verifier,
+    pick_verify_spec,
     CREW_RUNS,
     coverage_score,
     filter_facts,
@@ -231,6 +243,45 @@ class LeakTests(unittest.TestCase):
         tied = arbitrate_conflicts(even)
         self.assertTrue(all(item.get("status") == "contested" for item in even))
         self.assertTrue(any(item.get("status") == "contested" for item in tied))
+        worker = {"id": "algo", "name": "算法", "role": "worker", "step": "algo"}
+        cite = {"id": "cite", "name": "核源", "role": "worker", "brief": "核对出处"}
+        hidden = filter_facts(even + tied, worker)
+        self.assertFalse(any(item.get("status") == "contested" for item in hidden))
+        shown = filter_facts(even + tied, cite)
+        self.assertTrue(any(item.get("status") == "contested" for item in shown))
+        self.assertTrue(can_see_contested(cite))
+        self.assertFalse(can_see_contested(worker))
+        self.assertTrue(is_verifier(cite))
+        self.assertFalse(is_verifier(worker))
+        picked = pick_verify_spec([{"id": "algo", "name": "算法", "role": "worker"}, cite])
+        self.assertEqual(picked["id"], "cite")
+        fallback = pick_verify_spec([{"id": "write", "name": "成文", "role": "worker"}])
+        self.assertEqual(fallback["id"], "verify")
+        brief = format_contested(even)
+        self.assertIn("最优", brief)
+        self.assertEqual(len(contested_items(even)), 2)
+        sourced = [
+            {"claim": "官方口径 A：销量 100 万", "source": "gov.cn/a", "confidence": "high", "owner_id": "a", "status": "active", "for": ["write"]},
+            {"claim": "官方口径不是 100 万而是 80 万", "source": "stats.gov.cn/b", "confidence": "high", "owner_id": "b", "status": "active", "for": ["write"]},
+        ]
+        self.assertTrue(both_solid(sourced[0], sourced[1]))
+        verdicts = arbitrate_conflicts(sourced)
+        self.assertTrue(all(item.get("status") == "superseded" for item in sourced))
+        self.assertTrue(any(item.get("status") == "disputed" for item in verdicts))
+        self.assertIn("gov.cn", verdicts[0]["source"])
+        self.assertEqual(coverage_score(sourced + verdicts, ["write"])["conflicts"], 0)
+        writer = {"id": "write", "name": "成文", "role": "worker", "step": "write"}
+        shown = filter_facts(sourced + verdicts, writer)
+        self.assertTrue(any(item.get("status") == "disputed" for item in shown))
+        self.assertIn("[disputed]", format_contract(sourced + verdicts, writer))
+        weak = [
+            {"claim": "也许不支持导出", "source": "", "confidence": "low", "owner_id": "a", "status": "contested"},
+            {"claim": "也许支持导出", "source": "", "confidence": "low", "owner_id": "b", "status": "contested"},
+        ]
+        promoted = promote_remaining_contested(weak)
+        self.assertTrue(promoted)
+        self.assertEqual(contested_items(weak), [])
+        self.assertTrue(any(item.get("status") == "disputed" for item in weak))
 
     def test_commit_facts_replaces_owner_and_arbitrates(self):
         board = []
@@ -319,6 +370,29 @@ class LeakTests(unittest.TestCase):
         self.assertIn("不要扩写成终稿", state.briefs["write"])
         self.assertGreaterEqual(state.plan_version, 4)
         close_crew_run(run_id)
+
+    def test_budget_stops_and_policy(self):
+        self.assertEqual(clamp_budget(0), 0)
+        self.assertEqual(clamp_budget(-3), 0)
+        self.assertEqual(clamp_budget(480_000), 500_000)
+        self.assertEqual(format_budget(0, True), "♾️")
+        self.assertEqual(format_budget(0), "0")
+        self.assertEqual(format_budget(1_200_000), "1.2M")
+        self.assertEqual(format_budget(50_000), "50K")
+        tight = budget_policy(50_000, 40)
+        self.assertEqual(tight["workers"], 3)
+        self.assertEqual(tight["max_review"], 0)
+        self.assertEqual(budget_policy(0, 12)["workers"], 12)
+        self.assertEqual(parse_usage({"usage": {"input_tokens": 10, "output_tokens": 5}}), 15)
+        self.assertGreater(estimate_usage({"input": [{"role": "user", "content": "hello" * 40}]}, "ok"), 0)
+        state = CrewState("r3")
+        state.budget_tokens = 100
+        state.add_usage(40)
+        self.assertTrue(state.can_spend())
+        state.add_usage(80)
+        self.assertTrue(state.budget_hit)
+        self.assertFalse(state.can_spend())
+        self.assertEqual(state.snapshot()["spend"]["used"], 120)
 
 
 if __name__ == "__main__":

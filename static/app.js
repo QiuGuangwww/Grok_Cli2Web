@@ -94,6 +94,7 @@ const I18N = {
     "phase.planning": "拆任务",
     "phase.running": "专员工作中",
     "phase.aligning": "步骤对齐",
+    "phase.verifying": "核证未决",
     "phase.reviewing": "审核中",
     "phase.reworking": "打回重做",
     "phase.asking": "等你选择",
@@ -105,6 +106,7 @@ const I18N = {
     "phase.stop": "停止原因",
     "phase.planVer": "计划版本",
     "phase.score": "收敛",
+    "phase.spend": "预算",
     "inspect.task": "任务",
     "inspect.deps": "依赖",
     "inspect.depsOf": "基于 {names} 继续",
@@ -152,6 +154,9 @@ const I18N = {
     "agents.count": "子代理上限",
     "agents.warn": "上限较高时响应可能变慢，费用也会增加。建议不超过 8。",
     "agents.warnUse8": "改为 8",
+    "agents.budget": "本轮预算",
+    "agents.budgetLow": "省",
+    "agents.budgetHelp": "这一轮多 Agent 能花的 token 上限。拉到最右为不限；偏低时会少派专员、少返工，用满就转入汇总。",
     "theme.label": "主题",
     "theme.light": "浅色",
     "theme.paper": "素纸",
@@ -261,6 +266,7 @@ const I18N = {
     "phase.planning": "Planning",
     "phase.running": "Workers running",
     "phase.aligning": "Aligning",
+    "phase.verifying": "Verifying",
     "phase.reviewing": "Reviewing",
     "phase.reworking": "Reworking",
     "phase.asking": "Waiting on you",
@@ -272,6 +278,7 @@ const I18N = {
     "phase.stop": "Stop reason",
     "phase.planVer": "Plan version",
     "phase.score": "Convergence",
+    "phase.spend": "Budget",
     "inspect.task": "Task",
     "inspect.deps": "Depends on",
     "inspect.depsOf": "Continues from {names}",
@@ -319,6 +326,9 @@ const I18N = {
     "agents.count": "Sub-agent limit",
     "agents.warn": "A higher limit can be slower and cost more. 8 is a good ceiling.",
     "agents.warnUse8": "Use 8",
+    "agents.budget": "Run budget",
+    "agents.budgetLow": "Low",
+    "agents.budgetHelp": "Token cap for one multi-agent run. The far right is unlimited. A tighter cap uses fewer specialists and fewer rework rounds, then synthesizes.",
     "theme.label": "Theme",
     "theme.light": "Light",
     "theme.paper": "Paper",
@@ -428,6 +438,7 @@ const I18N = {
     "phase.planning": "分割中",
     "phase.running": "作業中",
     "phase.aligning": "同期中",
+    "phase.verifying": "検証中",
     "phase.reviewing": "レビュー中",
     "phase.reworking": "差戻し",
     "phase.asking": "選択待ち",
@@ -439,6 +450,7 @@ const I18N = {
     "phase.stop": "停止理由",
     "phase.planVer": "計画版",
     "phase.score": "収束",
+    "phase.spend": "予算",
     "inspect.task": "任務",
     "inspect.deps": "依存",
     "inspect.depsOf": "{names} を引き継いで続行",
@@ -486,6 +498,9 @@ const I18N = {
     "agents.count": "サブエージェント上限",
     "agents.warn": "上限を上げると遅くなり、費用も増えます。8 以下を推奨します。",
     "agents.warnUse8": "8 にする",
+    "agents.budget": "ラウンド予算",
+    "agents.budgetLow": "節約",
+    "agents.budgetHelp": "マルチエージェント1回あたりのトークン上限。右端は無制限。低いほど担当を減らし、差戻しも減らし、上限でまとめに入ります。",
     "theme.label": "テーマ",
     "theme.light": "ライト",
     "theme.paper": "紙",
@@ -649,6 +664,7 @@ const state = {
     worker_model: "grok-4.5",
     worker_effort: "medium",
     worker_count: 3,
+    budget_tokens: 0,
   },
   settingsTab: "account",
   leftW: Number(localStorage.getItem("grok-left-w")) || 280,
@@ -1139,9 +1155,48 @@ function fillAgentSelects() {
   if (slider) slider.value = String(count);
   if ($("workerCountVal")) $("workerCountVal").textContent = String(count);
   syncWorkerCountWarn(count);
+  fillBudgetSlider();
   document.querySelectorAll("[data-theme-set]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.themeSet === state.theme);
   });
+}
+
+const BUDGET_STOPS = [50000, 100000, 200000, 350000, 500000, 800000, 1200000, 2000000, 3500000, 5000000, 0];
+
+function formatBudget(tokens, unlimitedZero = false) {
+  const n = Number(tokens) || 0;
+  if (n <= 0) return unlimitedZero ? "♾️" : "0";
+  if (n >= 1000000) {
+    const m = n / 1000000;
+    return `${m % 1 === 0 ? m : m.toFixed(1)}M`;
+  }
+  return `${Math.round(n / 1000)}K`;
+}
+
+function budgetIndex(tokens) {
+  const n = Number(tokens);
+  const exact = BUDGET_STOPS.indexOf(n);
+  if (exact >= 0) return exact;
+  if (!n) return BUDGET_STOPS.length - 1;
+  let best = 0;
+  let dist = Infinity;
+  BUDGET_STOPS.forEach((stop, idx) => {
+    if (!stop) return;
+    const d = Math.abs(stop - n);
+    if (d < dist) {
+      dist = d;
+      best = idx;
+    }
+  });
+  return best;
+}
+
+function fillBudgetSlider() {
+  const slider = $("budgetTokens");
+  const tokens = Number(state.agentSettings.budget_tokens) || 0;
+  const index = budgetIndex(tokens);
+  if (slider) slider.value = String(index);
+  if ($("budgetTokensVal")) $("budgetTokensVal").textContent = formatBudget(BUDGET_STOPS[index], true);
 }
 
 function syncWorkerCountWarn(count) {
@@ -1173,6 +1228,7 @@ async function persistAgentSettings(partial = {}) {
       worker_model: state.agentSettings.worker_model,
       worker_effort: state.agentSettings.worker_effort,
       worker_count: Number(state.agentSettings.worker_count) || 3,
+      budget_tokens: Number(state.agentSettings.budget_tokens) || 0,
     }),
   });
   if (health?.agents) applyAgentSettings(health.agents);
@@ -1233,6 +1289,9 @@ function phaseCard(phase) {
   if (phase.running?.length) lines.push(`${t("phase.runningNow")}：${phase.running.join("、")}`);
   if (phase.sent_back?.length) lines.push(`${t("phase.sentBack")}：${phase.sent_back.join("、")}`);
   if (phase.plan_version) lines.push(`${t("phase.planVer")}：v${phase.plan_version}`);
+  if (phase.spend) {
+    lines.push(`${t("phase.spend")}：${formatBudget(phase.spend.used)} / ${formatBudget(phase.spend.budget, true)}`);
+  }
   const sc = phase.score;
   if (sc && (sc.coverage != null || sc.conflicts != null)) {
     lines.push(
@@ -1469,7 +1528,7 @@ function edgeIsLive(edge, byId) {
   const a = byId[edge.from];
   const b = byId[edge.to];
   if (!a || !b) return false;
-  if (edge.kind === "feedback" || edge.kind === "review" || edge.kind === "rework") {
+  if (edge.kind === "feedback" || edge.kind === "review" || edge.kind === "rework" || edge.kind === "verify") {
     return agentIsLive(a) || agentIsLive(b);
   }
   if (agentIsLive(a) && agentIsLive(b)) return true;
@@ -1654,7 +1713,7 @@ function tickAgentGraph() {
     const b = nodes.get(e.to);
     if (!a || !b) continue;
     const live = edgeIsLive(e, byId);
-    const ask = e.kind === "feedback" || e.kind === "review" || e.kind === "rework";
+    const ask = e.kind === "feedback" || e.kind === "review" || e.kind === "rework" || e.kind === "verify";
     const mx = (a.x + b.x) / 2;
     const my = (a.y + b.y) / 2 + (a.x < b.x ? -12 : 12);
     ctx.beginPath();
@@ -3273,6 +3332,15 @@ function bindEvents() {
   });
   $("workerCountSuggest")?.addEventListener("click", async () => {
     await persistAgentSettings({ worker_count: 8 });
+  });
+  $("budgetTokens")?.addEventListener("input", () => {
+    const index = Number($("budgetTokens").value) || 0;
+    const tokens = BUDGET_STOPS[index] ?? 0;
+    if ($("budgetTokensVal")) $("budgetTokensVal").textContent = formatBudget(tokens, true);
+  });
+  $("budgetTokens")?.addEventListener("change", async () => {
+    const index = Number($("budgetTokens").value) || 0;
+    await persistAgentSettings({ budget_tokens: BUDGET_STOPS[index] ?? 0 });
   });
   $("saveKey").addEventListener("click", async () => {
     const payload = {};

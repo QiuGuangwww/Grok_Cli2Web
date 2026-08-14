@@ -137,6 +137,7 @@ FEEDBACK_RULE = (
 GOAL_PIN = (
     "IMMUTABLE GOAL — never replace, broaden, or drift from this. "
     "The contract below is read-only evidence. Hypothesis is not fact. "
+    "A [disputed] entry is a documented split with sources on both sides — report both, do not pick a winner. "
     "If a contract entry conflicts with the goal, keep the goal and flag the conflict."
 )
 
@@ -826,6 +827,7 @@ class SettingsIn(BaseModel):
     worker_model: str | None = None
     worker_effort: str | None = None
     worker_count: int | None = None
+    budget_tokens: int | None = None
 
 
 class GuideIn(BaseModel):
@@ -886,6 +888,80 @@ def clamp_workers(value: Any, fallback: int = 3) -> int:
         return fallback
 
 
+BUDGET_STOPS = (50_000, 100_000, 200_000, 350_000, 500_000, 800_000, 1_200_000, 2_000_000, 3_500_000, 5_000_000, 0)
+
+
+def clamp_budget(value: Any, fallback: int = 0) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    if n <= 0:
+        return 0
+    finite = [item for item in BUDGET_STOPS if item]
+    return min(finite, key=lambda item: abs(item - n))
+
+
+def format_budget(tokens: int, unlimited_zero: bool = False) -> str:
+    n = int(tokens or 0)
+    if n <= 0:
+        return "♾️" if unlimited_zero else "0"
+    if n >= 1_000_000:
+        text = f"{n / 1_000_000:.1f}M"
+        return text.replace(".0M", "M")
+    return f"{n // 1000}K"
+
+
+def budget_policy(budget_tokens: int, worker_count: int) -> dict[str, int]:
+    workers = clamp_workers(worker_count, 3)
+    if not budget_tokens:
+        return {"workers": workers, "max_review": 2, "batch": 8, "follow": 2}
+    if budget_tokens <= 100_000:
+        return {"workers": min(workers, 3), "max_review": 0, "batch": 2, "follow": 0}
+    if budget_tokens <= 350_000:
+        return {"workers": min(workers, 6), "max_review": 1, "batch": 4, "follow": 1}
+    if budget_tokens <= 800_000:
+        return {"workers": min(workers, 10), "max_review": 2, "batch": 6, "follow": 1}
+    return {"workers": workers, "max_review": 2, "batch": 8, "follow": 2}
+
+
+def parse_usage(blob: Any) -> int:
+    if not isinstance(blob, dict):
+        return 0
+    usage = blob.get("usage")
+    if not isinstance(usage, dict) and isinstance(blob.get("response"), dict):
+        usage = blob["response"].get("usage")
+    if not isinstance(usage, dict):
+        return 0
+    for key in ("total_tokens", "total_token_count", "tokens"):
+        try:
+            n = int(usage.get(key) or 0)
+        except (TypeError, ValueError):
+            n = 0
+        if n > 0:
+            return n
+    parts = 0
+    for key in ("input_tokens", "output_tokens", "prompt_tokens", "completion_tokens", "reasoning_tokens"):
+        try:
+            parts += int(usage.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+    for nest in (usage.get("output_tokens_details"), usage.get("input_tokens_details")):
+        if not isinstance(nest, dict):
+            continue
+        for val in nest.values():
+            try:
+                parts += int(val or 0)
+            except (TypeError, ValueError):
+                continue
+    return parts
+
+
+def estimate_usage(payload: dict[str, Any], text: str = "") -> int:
+    raw = json.dumps(payload.get("input") or "", ensure_ascii=False)
+    return max(len(raw) // 4, 48) + max(len(text or "") // 3, 24)
+
+
 def agent_settings() -> dict[str, Any]:
     raw = load_settings()
     return {
@@ -894,6 +970,7 @@ def agent_settings() -> dict[str, Any]:
         "worker_model": _pick(raw.get("worker_model"), KNOWN_MODELS, "grok-4.5"),
         "worker_effort": _pick(raw.get("worker_effort"), KNOWN_EFFORTS, "medium"),
         "worker_count": clamp_workers(raw.get("worker_count"), 3),
+        "budget_tokens": clamp_budget(raw.get("budget_tokens"), 0),
     }
 
 
@@ -935,6 +1012,8 @@ async def update_settings(body: SettingsIn) -> dict[str, Any]:
         patch["worker_effort"] = _pick(body.worker_effort, KNOWN_EFFORTS, "medium")
     if body.worker_count is not None:
         patch["worker_count"] = clamp_workers(body.worker_count, 3)
+    if body.budget_tokens is not None:
+        patch["budget_tokens"] = clamp_budget(body.budget_tokens, 0)
     if patch:
         save_settings(patch)
     return await health()
@@ -1196,6 +1275,7 @@ async def xai_stream(token: str, payload: dict[str, Any], restarts: int = 0):
     response_id = None
     stalled = False
     dropped = False
+    usage_tokens = 0
     try:
         async with async_client(timeout=httpx.Timeout(3600.0, connect=30.0)) as client:
             async with client.stream(
@@ -1258,6 +1338,7 @@ async def xai_stream(token: str, payload: dict[str, Any], restarts: int = 0):
                         elif etype == "response.completed":
                             response = event.get("response") or {}
                             response_id = response.get("id") or event.get("id")
+                            usage_tokens = parse_usage(event) or parse_usage(response) or usage_tokens
                             for entry in harvest_activity(event):
                                 activity.append(entry)
                                 yield {"type": "activity", "entry": entry}
@@ -1292,7 +1373,8 @@ async def xai_stream(token: str, payload: dict[str, Any], restarts: int = 0):
         kept = visible_answer("".join(collected))
         log.warning("xai_stream dropped: %s (kept %s chars)", exc, len(kept))
         if looks_complete(kept) and not loop_detected(kept):
-            yield {"type": "done", "text": kept, "response_id": response_id, "activity": compact_activity(activity)}
+            used = usage_tokens or estimate_usage(payload, kept)
+            yield {"type": "done", "text": kept, "response_id": response_id, "activity": compact_activity(activity), "usage": used}
             return
         dropped = True
     if stalled or dropped:
@@ -1316,16 +1398,24 @@ async def xai_stream(token: str, payload: dict[str, Any], restarts: int = 0):
         yield {"type": "reset"}
         if kept:
             yield {"type": "delta", "text": kept}
+        kept_text = kept or ("连接中断，已停止。请再试一次。" if dropped else "这一轮陷入空转，已停止。请再试一次。")
         yield {
             "type": "done",
-            "text": kept or ("连接中断，已停止。请再试一次。" if dropped else "这一轮陷入空转，已停止。请再试一次。"),
+            "text": kept_text,
             "response_id": response_id,
             "activity": compact_activity(activity),
             "stalled": True,
+            "usage": usage_tokens or estimate_usage(payload, kept_text),
         }
         return
     full = visible_answer("".join(collected))
-    yield {"type": "done", "text": full, "response_id": response_id, "activity": compact_activity(activity)}
+    yield {
+        "type": "done",
+        "text": full,
+        "response_id": response_id,
+        "activity": compact_activity(activity),
+        "usage": usage_tokens or estimate_usage(payload, full),
+    }
 
 
 DEFAULT_ROLES = [
@@ -1587,6 +1677,9 @@ class CrewState:
         self.steers: list[dict[str, str]] = []
         self.acceptance: list[str] = []
         self.score: dict[str, Any] = {}
+        self.budget_tokens = 0
+        self.tokens_used = 0
+        self.budget_hit = False
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -1599,7 +1692,26 @@ class CrewState:
             "stop": self.stop_reason,
             "plan_version": self.plan_version,
             "score": dict(self.score),
+            "spend": {
+                "used": self.tokens_used,
+                "budget": self.budget_tokens,
+                "hit": self.budget_hit,
+            },
         }
+
+    def add_usage(self, tokens: int) -> None:
+        try:
+            n = int(tokens or 0)
+        except (TypeError, ValueError):
+            n = 0
+        if n <= 0:
+            return
+        self.tokens_used += n
+        if self.budget_tokens and self.tokens_used >= self.budget_tokens:
+            self.budget_hit = True
+
+    def can_spend(self) -> bool:
+        return not self.budget_hit
 
     def enter(self, phase: str, running: list[str] | None = None) -> dict[str, Any]:
         self.phase = phase
@@ -1667,9 +1779,11 @@ def token_overlap(left: str, right: str) -> float:
 def find_conflicts(facts: list[dict[str, Any]]) -> list[tuple[dict[str, Any], dict[str, Any]]]:
     neg = ("不是", "并非", "并不", "没有", "无法", "不能", "不支持", "相反", "冲突", " not ", " no ", "cannot", "unlike")
     pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
-    active = [item for item in facts if item.get("status") != "superseded"]
+    active = [item for item in facts if item.get("status") not in {"superseded", "disputed"}]
     for i, left in enumerate(active):
         for right in active[i + 1 :]:
+            if left.get("status") == "disputed" or right.get("status") == "disputed":
+                continue
             if left.get("owner_id") and left.get("owner_id") == right.get("owner_id"):
                 continue
             if token_overlap(str(left.get("claim") or ""), str(right.get("claim") or "")) < 0.28:
@@ -1681,6 +1795,55 @@ def find_conflicts(facts: list[dict[str, Any]]) -> list[tuple[dict[str, Any], di
             if hit_l != hit_r:
                 pairs.append((left, right))
     return pairs[:8]
+
+
+def both_solid(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    rank = {"high": 3, "medium": 2, "low": 1, "hypothesis": 0}
+    if rank.get(str(left.get("confidence") or "medium"), 1) < 2:
+        return False
+    if rank.get(str(right.get("confidence") or "medium"), 1) < 2:
+        return False
+    return bool(str(left.get("source") or "").strip()) and bool(str(right.get("source") or "").strip())
+
+
+def make_disputed(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    sl = str(left.get("source") or left.get("owner") or "一方")[:160]
+    sr = str(right.get("source") or right.get("owner") or "另一方")[:160]
+    fors: list[str] = []
+    for item in (left, right):
+        for tag in item.get("for") or []:
+            key = str(tag)
+            if key and key not in fors:
+                fors.append(key)
+    return {
+        "claim": f"存在分歧：{str(left.get('claim') or '')[:140]} vs {str(right.get('claim') or '')[:140]}",
+        "source": f"{sl} | {sr}",
+        "confidence": "high",
+        "for": fors,
+        "owner": "总控",
+        "owner_id": "lead",
+        "status": "disputed",
+        "sides": [str(left.get("claim") or "")[:200], str(right.get("claim") or "")[:200]],
+    }
+
+
+def promote_pair(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    left["status"] = "superseded"
+    right["status"] = "superseded"
+    return make_disputed(left, right)
+
+
+def promote_remaining_contested(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    verdicts: list[dict[str, Any]] = []
+    for left, right in find_conflicts(facts):
+        if left.get("status") == "disputed" or right.get("status") == "disputed":
+            continue
+        verdicts.append(promote_pair(left, right))
+    for item in facts:
+        if item.get("status") == "contested":
+            item["status"] = "superseded"
+    facts.extend(verdicts)
+    return verdicts
 
 
 def pick_fact_winner(left: dict[str, Any], right: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]] | None:
@@ -1698,10 +1861,13 @@ def pick_fact_winner(left: dict[str, Any], right: dict[str, Any]) -> tuple[dict[
 def arbitrate_conflicts(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     verdicts: list[dict[str, Any]] = []
     for left, right in find_conflicts(facts):
-        if left.get("status") == "superseded" or right.get("status") == "superseded":
+        if left.get("status") in {"superseded", "disputed"} or right.get("status") in {"superseded", "disputed"}:
             continue
         picked = pick_fact_winner(left, right)
         if picked is None:
+            if both_solid(left, right):
+                verdicts.append(promote_pair(left, right))
+                continue
             left["status"] = "contested"
             right["status"] = "contested"
             verdicts.append(
@@ -1731,6 +1897,64 @@ def arbitrate_conflicts(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return verdicts
+
+
+VERIFY_KEYS = ("cite", "核源", "verify", "核实", "校验", "check", "source")
+
+
+def contested_items(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [item for item in facts if item.get("status") == "contested"][:8]
+
+
+def format_contested(facts: list[dict[str, Any]]) -> str:
+    items = contested_items(facts)
+    if not items:
+        return ""
+    lines = ["CONTESTED — not fact. Search and settle with a sourced claim. Do not leave downstream to guess."]
+    for item in items:
+        src = item.get("source") or "无出处"
+        owner = item.get("owner") or item.get("owner_id") or "未知"
+        lines.append(f"- {item.get('claim')} （{src}；{owner}）")
+    return "\n".join(lines)
+
+
+def is_verifier(spec: dict[str, Any] | None) -> bool:
+    if not spec or _is_reviewer(spec):
+        return False
+    blob = f"{spec.get('id') or ''} {spec.get('name') or ''} {spec.get('brief') or ''} {spec.get('role') or ''}".lower()
+    return any(key in blob for key in VERIFY_KEYS)
+
+
+def can_see_contested(viewer: dict[str, Any] | None) -> bool:
+    if not viewer:
+        return True
+    role = str(viewer.get("role") or "").lower()
+    if role in {"lead", "reviewer", "step-lead"}:
+        return True
+    return is_verifier(viewer)
+
+
+def pick_verify_spec(roster: list[dict[str, Any]]) -> dict[str, Any]:
+    for spec in roster:
+        if spec.get("role") in {"lead", "reviewer", "step-lead"}:
+            continue
+        if is_verifier(spec):
+            return spec
+    for spec in roster:
+        if spec.get("role") in {"lead", "reviewer", "step-lead"}:
+            continue
+        blob = f"{spec.get('id') or ''} {spec.get('name') or ''}".lower()
+        if any(key in blob for key in ("research", "调研", "search")):
+            return spec
+    return {
+        "id": "verify",
+        "name": "核源",
+        "brief": "核对未决冲突，只登记带出处的事实",
+        "depends_on": [],
+        "step": "verify",
+        "step_name": "核证",
+        "role": "worker",
+    }
 
 
 def merge_feedback(items: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -1777,7 +2001,7 @@ def merge_asks(asks: list[dict[str, Any]]) -> dict[str, Any] | None:
 def coverage_score(facts: list[dict[str, Any]], step_ids: list[str], acceptance: list[str] | None = None) -> dict[str, Any]:
     active = [item for item in facts if item.get("status") != "superseded"]
     n = max(len(active), 1)
-    solid = sum(1 for item in active if item.get("confidence") in {"high", "medium"})
+    solid = sum(1 for item in active if item.get("status") == "disputed" or item.get("confidence") in {"high", "medium"})
     covered = 0
     for sid in step_ids:
         key = str(sid or "").lower()
@@ -2119,7 +2343,7 @@ def commit_facts(board: list[dict[str, Any]], report: dict[str, Any]) -> list[di
     ]
     board.extend(harvest_facts(report))
     for item in board:
-        if item.get("status") in {"superseded", "contested"}:
+        if item.get("status") == "contested":
             item["status"] = "active"
     board.extend(arbitrate_conflicts(board))
     return board
@@ -2168,6 +2392,8 @@ def filter_facts(facts: list[dict[str, Any]], viewer: dict[str, Any] | None = No
     for item in facts:
         if item.get("status") == "superseded":
             continue
+        if item.get("status") == "contested" and not can_see_contested(viewer):
+            continue
         targets = [str(x).lower() for x in (item.get("for") or [])]
         conf = str(item.get("confidence") or "medium")
         if not targets:
@@ -2198,7 +2424,11 @@ def format_contract(facts: list[dict[str, Any]], viewer: dict[str, Any] | None =
     for item in rows:
         src = item.get("source") or "未标注出处"
         owner = item.get("owner") or "未知"
-        mark = " [contested]" if item.get("status") == "contested" else ""
+        mark = ""
+        if item.get("status") == "disputed":
+            mark = " [disputed]"
+        elif item.get("status") == "contested":
+            mark = " [contested]"
         lines.append(f"- [{item.get('confidence')}] {item.get('claim')}{mark} （{src}；{owner}）")
     return "\n".join(lines)
 
@@ -2208,7 +2438,7 @@ def pack_contract_ledger(facts: list[dict[str, Any]]) -> tuple[str, list[dict[st
     entries: list[dict[str, str]] = []
     visible = [item for item in facts if item.get("status") != "superseded"]
     for item in visible[-24:]:
-        tag = item.get("status") if item.get("status") in {"contested"} else item.get("confidence")
+        tag = item.get("status") if item.get("status") in {"contested", "disputed"} else item.get("confidence")
         entries.append(
             {
                 "id": str(item.get("owner_id") or ""),
@@ -2249,9 +2479,14 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
     lead_effort = cfg.get("lead_effort") or "high"
     worker_model = cfg.get("worker_model") or "grok-4.5"
     worker_effort = cfg.get("worker_effort") or "medium"
-    worker_count = clamp_workers(cfg.get("worker_count"), 3)
+    wanted_workers = clamp_workers(cfg.get("worker_count"), 3)
+    budget_tokens = clamp_budget(cfg.get("budget_tokens"), 0)
+    policy = budget_policy(budget_tokens, wanted_workers)
+    worker_count = policy["workers"]
     run_id = open_crew_run()
     machine = CrewState(run_id)
+    machine.budget_tokens = budget_tokens
+    machine.max_review = policy["max_review"]
     CREW_RUNS[run_id]["machine"] = machine
     human_lead_notes: list[str] = []
     running_ids: set[str] = set()
@@ -2260,6 +2495,13 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
     yield machine.enter("planning", ["lead"])
 
     plan_effort = _soften_effort(lead_effort)
+    if budget_tokens and budget_tokens <= 100_000:
+        worker_effort = _soften_effort(worker_effort)
+    if worker_count < wanted_workers:
+        yield {
+            "type": "status",
+            "text": f"本轮预算 {format_budget(budget_tokens, True)}，专员上限改为 {worker_count}",
+        }
     yield {"type": "status", "text": "总控正在拆任务并对齐依赖…"}
     yield {
         "type": "agent",
@@ -2310,6 +2552,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                 plan_raw += ev.get("text") or ""
             elif ev["type"] == "done":
                 plan_raw = ev.get("text") or plan_raw
+                machine.add_usage(ev.get("usage") or 0)
             elif ev["type"] == "error":
                 log.warning("crew plan failed: %s", ev.get("message"))
                 yield {"type": "status", "text": "规划未完成，改用默认分工继续"}
@@ -2337,6 +2580,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                         plan_raw += ev.get("text") or ""
                     elif ev["type"] == "done":
                         plan_raw = ev.get("text") or plan_raw
+                        machine.add_usage(ev.get("usage") or 0)
                     elif ev["type"] == "error":
                         log.warning("crew replan failed: %s", ev.get("message"))
                         plan_raw = ""
@@ -2462,6 +2706,8 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                 elif ev["type"] == "done":
                     full = ev.get("text") or full
                     activity = ev.get("activity") or activity
+                    machine.add_usage(ev.get("usage") or 0)
+                    await queue.put(machine.snapshot())
                     if ev.get("stalled"):
                         stalled = True
                         status = "partial"
@@ -2601,6 +2847,103 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
             ],
         }
 
+    def later_step_ids(from_index: int) -> set[str]:
+        return {s["id"] for w in step_waves[from_index + 1 :] for s in w}
+
+    async def settle_contested(from_index: int):
+        for attempt in range(2):
+            open_items = contested_items(fact_board)
+            if not open_items or not machine.can_spend():
+                return
+            spec = pick_verify_spec(roster_specs)
+            if spec.get("id") not in {item.get("id") for item in roster_specs}:
+                roster_specs.append(spec)
+                machine.briefs.setdefault(str(spec["id"]), spec.get("brief") or "")
+                yield {
+                    "type": "agent",
+                    "agent": _agent_view(
+                        spec,
+                        role=spec.get("role") or "worker",
+                        status="queued",
+                        model=worker_model,
+                        effort=worker_effort,
+                    ),
+                }
+            machine.bump_plan(f"verify contested: {str(open_items[0].get('claim') or '')[:120]}")
+            later_ids = later_step_ids(from_index)
+            for other in roster_specs:
+                if other.get("step") in later_ids:
+                    yield {
+                        "type": "agent",
+                        "agent": _agent_view(
+                            other,
+                            role=other.get("role") or "worker",
+                            status="blocked",
+                            model=worker_model,
+                            effort=worker_effort,
+                        ),
+                    }
+            yield machine.enter("verifying", [str(spec.get("id") or "verify")])
+            yield {
+                "type": "status",
+                "text": f"未决冲突先核证（{len(open_items)} 条），依赖它的步骤先等着",
+            }
+            yield {"type": "link", **remember_link("lead", str(spec.get("id") or "verify"), "verify")}
+            payload = {
+                "model": worker_model,
+                "stream": True,
+                "store": False,
+                "tools": list(DEFAULT_TOOLS),
+                "reasoning": {"effort": worker_effort},
+                "input": [
+                    {
+                        "role": "system",
+                        "content": (
+                            f"You are the verify specialist {spec.get('name')}. {TOOL_RULE} {FEEDBACK_RULE} {GOAL_PIN} "
+                            "Your only job is to settle CONTESTED contract claims. Search or check sources. "
+                            "If one side has a better source, emit that fact. "
+                            "If both sides stay equally sourced — official channels disagree — emit BOTH claims with sources. "
+                            "Do not invent a winner. Do not write the user-facing answer."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"{GOAL_PIN}\n{question}\n\n{format_contested(fact_board)}\n\n"
+                            f"Current contract:\n{format_contract(fact_board, spec)}\n"
+                            "Settle only these contested items."
+                        ),
+                    },
+                ],
+            }
+            async for ev in iter_agent(spec, payload, spec.get("role") or "worker"):
+                if ev.get("type") == "_done":
+                    continue
+                yield ev
+            leftover = contested_items(fact_board)
+            pairs = find_conflicts(fact_board)
+            solid_tie = any(both_solid(a, b) for a, b in pairs)
+            if leftover and (solid_tie or attempt >= 1):
+                promote_remaining_contested(fact_board)
+                leftover = contested_items(fact_board)
+                machine.bump_plan("recorded documented split; stop verifying")
+                yield {"type": "status", "text": "双方出处都扎实，已记成「存在分歧」，不再核证"}
+            note = (
+                "核证已结：以合同现条目为准；[disputed] 是客观分歧，报告双方，不要选边"
+                if not leftover
+                else "核证未完全结清：不要把 contested 当事实，也不要各自再猜"
+            )
+            for other in roster_specs:
+                if other.get("step") in later_ids:
+                    stash_ask(str(other["id"]), "核证", note)
+            machine.score = coverage_score(fact_board, [s["id"] for s in steps], machine.acceptance)
+            yield machine.snapshot()
+            text, entries = pack_contract_ledger(fact_board)
+            yield {"type": "ledger", "wave": from_index + 1, "waves": len(step_waves), "text": text, "entries": entries}
+            if leftover and attempt == 0:
+                continue
+            break
+
     async def emit_route(queue: asyncio.Queue, origin: dict[str, Any], target: dict[str, Any], ask: str, kind: str) -> bool:
         key = (str(origin.get("id") or ""), str(target.get("id") or ""), ask[:80])
         if not key[0] or not key[1] or key in routed:
@@ -2704,10 +3047,16 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
         extra_by_id: dict[str, str] | None = None,
     ) -> None:
         extra_by_id = extra_by_id or {}
-        for offset in range(0, len(batch), 8):
-            slice_ = batch[offset : offset + 8]
+        batch_size = max(1, int(policy.get("batch") or 8))
+        for offset in range(0, len(batch), batch_size):
+            if not machine.can_spend():
+                await queue.put({"type": "status", "text": f"已达本轮预算 {format_budget(machine.budget_tokens, True)}，不再开新的专员"})
+                break
+            slice_ = batch[offset : offset + batch_size]
             tasks = []
             for spec in slice_:
+                if not machine.can_spend():
+                    break
                 extra = take_stashed(spec["id"], extra_by_id.get(spec["id"], ""))
                 tasks.append(
                     asyncio.create_task(
@@ -2797,7 +3146,9 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
             upsert_report(lead_result)
             coord = lead_result.get("content") or coord
         await run_workers(workers, step, board, coord, queue)
-        for _ in range(2):
+        for _ in range(max(0, int(policy.get("follow") or 0))):
+            if not machine.can_spend():
+                break
             follow: dict[str, list[str]] = {}
             for spec in workers:
                 result = completed.get(spec["id"]) or {}
@@ -2905,6 +3256,10 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
         await asyncio.gather(*tasks, return_exceptions=True)
 
     for index, wave in enumerate(step_waves):
+        if not machine.can_spend():
+            yield {"type": "status", "text": f"已达本轮预算 {format_budget(machine.budget_tokens, True)}，跳过后续步骤"}
+            yield machine.snapshot()
+            break
         names = [s["name"] for s in wave]
         live_ids = []
         for step in wave:
@@ -2959,12 +3314,18 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                 yield {"type": "status", "text": "已按你的选择继续"}
                 machine.score = coverage_score(fact_board, [s["id"] for s in steps], machine.acceptance)
                 yield machine.snapshot()
+        async for ev in settle_contested(index):
+            yield ev
 
     async for ev in flush_guidance():
         yield ev
 
     review_notes = ""
     for review_round in range(3):
+        if not machine.can_spend():
+            yield {"type": "status", "text": f"已达本轮预算 {format_budget(machine.budget_tokens, True)}，跳过审核，转入汇总"}
+            yield machine.snapshot()
+            break
         machine.review_round = review_round
         yield machine.enter("reviewing", [str(reviewer_spec.get("id") or "reviewer")])
         yield {"type": "status", "text": "审核正在检查各步骤产出…" if review_round == 0 else f"第 {review_round} 轮返工后复审…"}
@@ -3032,6 +3393,10 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
             if target.get("id") and target.get("id") != "lead":
                 stash_ask(str(target["id"]), str(reviewer_spec.get("name") or "审核"), item["ask"])
                 machine.mark_sent_back(str(target["id"]))
+        if not machine.can_spend():
+            yield {"type": "status", "text": f"已达本轮预算 {format_budget(machine.budget_tokens, True)}，不再返工"}
+            yield machine.snapshot()
+            break
         verdict = decide_review(review, review_raw, review_round, machine.max_review, machine.score)
         if verdict == "pass":
             yield {"type": "status", "text": f"审核通过（覆盖 {score.get('coverage')} / 冲突 {score.get('conflicts')}），交总控汇总"}
@@ -3197,6 +3562,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
             lead_text = ev.get("text") or lead_text
             lead_activity = ev.get("activity") or lead_activity
             response_id = ev.get("response_id") or response_id
+            machine.add_usage(ev.get("usage") or 0)
         elif ev["type"] == "error":
             yield ev
             return
@@ -3243,6 +3609,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                     lead_text = ev.get("text") or lead_text
                     lead_activity = ev.get("activity") or lead_activity
                     response_id = ev.get("response_id") or response_id
+                    machine.add_usage(ev.get("usage") or 0)
                 elif ev["type"] == "error":
                     yield ev
                     return

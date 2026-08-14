@@ -304,6 +304,17 @@
                   <button type="button" id="workerCountSuggest" data-i18n="agents.warnUse8">改为 8</button>
                 </div>
               </div>
+              <div class="field">
+                <div class="slider-head">
+                  <label for="budgetTokens" data-i18n="agents.budget">本轮预算</label>
+                  <span id="budgetTokensVal">♾️</span>
+                </div>
+                <div class="slider-wrap">
+                  <input id="budgetTokens" type="range" min="0" max="10" step="1" value="10" />
+                </div>
+                <div class="slider-ticks"><span data-i18n="agents.budgetLow">省</span><span>♾️</span></div>
+                <p class="help" data-i18n="agents.budgetHelp">这一轮多 Agent 能花的 token 上限。拉到最右为不限；偏低时会少派专员、少返工，用满就转入汇总。</p>
+              </div>
             </section>
             <section class="settings-pane" data-set-pane="appearance" hidden>
               <p class="help" data-i18n="theme.hint">预览并选择外观。</p>
@@ -358,6 +369,6 @@
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.5/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/common.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js"></script>
-    <script src="/assets/app.js?v=55"></script>
+    <script src="/assets/app.js?v=57"></script>
   </body>
 </html>

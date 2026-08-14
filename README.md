@@ -32,7 +32,7 @@ Listens on `127.0.0.1` only · chats stay on disk in `~/.grok/web-chat/`
 
 Composer mode **Multi-agent**. The lead plans a few steps; independent steps run together. A step can have several specialists plus a step lead who aligns them. Later steps consume a **filtered fact contract** (claim, source, confidence), not other specialists' essays. The original user goal is pinned and cannot be overwritten by the board.
 
-The slider is a **maximum** headcount (2–144), not a fixed roster. Lead and workers use separate models in settings.
+The headcount slider is a **maximum** (2–144), not a fixed roster. A second slider sets the **run budget** in tokens; the far right is **Unlimited** (♾️). A tighter cap uses fewer specialists and fewer rework rounds, then synthesizes with what it has. Lead and workers use separate models in settings.
 
 <p align="center">
   <img src="static/crew.svg" alt="Multi-agent flow: you talk to Brain, specialists write a filtered fact contract, Brain arbitrates conflicts and scores whether to stop or reuse agents" width="720" />
@@ -45,7 +45,7 @@ The slider is a **maximum** headcount (2–144), not a fixed roster. Lead and wo
 - **Reviewer** can send work back. Extra rounds **reuse** existing agents and hand them a changelog of what changed. Two review passes is the hard cap; a score (coverage, confidence, open conflicts, your acceptance points) can stop earlier.
 - If Brain cannot decide without guessing, questions are **batched** into one `/`-style choice. The last option is always **Other**.
 - Specialists must not invent missing facts. They route uncertainty to the right teammate. Later agents only see contract entries tagged for them.
-- **Conflicts** are arbitrated by Brain (higher confidence / sourced claim wins). A true tie is marked contested, not guessed.
+- **Conflicts** are arbitrated by Brain (higher confidence / sourced claim wins). A true tie is marked contested and a verify/cite specialist is sent once. If both sides stay equally sourced — two official channels disagree — Brain promotes that pair to a permanent **disputed** fact with both citations. Downstream reports the split instead of waiting for a winner. Ordinary workers do not see unresolved contested claims.
 - Guidance you type into a worker is written back into Brain (new plan version + updated brief). Later scheduling follows the correction, not the old plan.
 - While a run is live, click a worker in the team list or the graph and type guidance. Stop marks every live agent as stopped; switching chats closes the team pane so it does not leak into another conversation.
 - Graph: green node = working, green edge = aligning, amber edge = feedback. Nodes can be dragged. **View process** stays hidden when there is nothing to show.
