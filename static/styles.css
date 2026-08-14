@@ -332,6 +332,38 @@ button {
   color: var(--text-faint);
 }
 
+.src-filter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 10px;
+}
+
+.src-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--text-muted);
+}
+
+.src-chip:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.src-chip.active {
+  background: var(--bg-elevated);
+  color: var(--text);
+  border-color: var(--border);
+}
+
 .gutter {
   flex: 0 0 6px;
   width: 6px;
@@ -1047,6 +1079,33 @@ a.primary-btn {
   color: var(--text);
 }
 
+.lang-picker .lang-btn {
+  gap: 2px;
+  padding: 0 6px 0 12px;
+}
+
+.lang-picker .lang-btn svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+}
+
+.lang-picker.open .lang-btn {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.lang-menu {
+  left: auto;
+  right: 0;
+  min-width: 148px;
+}
+
+.lang-menu .model-option {
+  align-items: center;
+  padding: 8px 12px;
+}
+
 .primary-btn {
   background: var(--text);
   color: var(--bg);
@@ -1186,8 +1245,10 @@ html[data-scheme="dark"] .primary-btn {
 }
 
 .msg-actions button {
+  box-sizing: border-box;
   height: 28px;
   padding: 0 8px;
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   color: var(--text-muted);
   font-size: 12.5px;
@@ -1348,11 +1409,17 @@ html[data-scheme="dark"] .primary-btn {
 }
 
 .code-head button {
+  box-sizing: border-box;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
   color: var(--text-muted);
 }
 
 .code-head button:hover {
   color: var(--text);
+  background: var(--bg-hover);
 }
 
 .code-block pre {
@@ -2035,7 +2102,25 @@ input[type="range"]::-moz-range-progress {
 }
 
 .theme-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   padding: 4px 16px 24px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.theme-body::-webkit-scrollbar,
+.settings-scroll::-webkit-scrollbar,
+.thread::-webkit-scrollbar {
+  width: 8px;
+}
+
+.theme-body::-webkit-scrollbar-thumb,
+.settings-scroll::-webkit-scrollbar-thumb,
+.thread::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 99px;
 }
 
 .theme-grid {

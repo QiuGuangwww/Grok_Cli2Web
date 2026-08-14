@@ -18,6 +18,9 @@ from typing import Any
 import logging
 
 import httpx
+
+# Windows registry often maps .svg -> image/svg. Browsers only render image/svg+xml.
+mimetypes.add_type("image/svg+xml", ".svg")
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -573,7 +576,88 @@ def find_cli_dir(sid: str) -> Path:
     raise HTTPException(404, "对话不存在")
 
 
-def parse_cli_messages(session_dir: Path) -> list[dict[str, Any]]:
+USER_QUERY_RE = re.compile(r"<user_query>\s*(.*?)\s*</user_query>", re.DOTALL)
+SKIP_USER_PREFIXES = ("<system-reminder>", "<user_info>", "<rules>", "<skill")
+
+
+def visible_user_text(raw: str) -> str | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    found = USER_QUERY_RE.search(text)
+    if found:
+        return found.group(1).strip() or None
+    if text.startswith(SKIP_USER_PREFIXES):
+        return None
+    return text
+
+
+def _cli_blocks_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict) and block.get("type") == "text":
+            parts.append(str(block.get("text") or ""))
+    return "\n".join(parts)
+
+
+def parse_cli_chat_history(session_dir: Path) -> list[dict[str, Any]]:
+    path = session_dir / "chat_history.jsonl"
+    if not path.exists():
+        return []
+    messages: list[dict[str, Any]] = []
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                kind = obj.get("type")
+                if kind == "user":
+                    if obj.get("synthetic_reason"):
+                        continue
+                    text = visible_user_text(_cli_blocks_to_text(obj.get("content")))
+                    if not text:
+                        continue
+                    messages.append(
+                        {
+                            "id": f"cli-user-{len(messages)}",
+                            "role": "user",
+                            "content": text,
+                            "files": [],
+                            "source": "cli",
+                            "created_at": obj.get("timestamp"),
+                        }
+                    )
+                elif kind == "assistant":
+                    text = str(obj.get("content") or "").strip()
+                    if not text:
+                        continue
+                    messages.append(
+                        {
+                            "id": f"cli-asst-{len(messages)}",
+                            "role": "assistant",
+                            "content": text,
+                            "files": [],
+                            "source": "cli",
+                            "created_at": obj.get("timestamp"),
+                        }
+                    )
+    except OSError:
+        return messages
+    return messages
+
+
+def parse_cli_updates(session_dir: Path) -> list[dict[str, Any]]:
     path = session_dir / "updates.jsonl"
     if not path.exists():
         return []
@@ -587,12 +671,9 @@ def parse_cli_messages(session_dir: Path) -> list[dict[str, Any]]:
             tools = []
             return
         text = str(current.get("content") or "").strip()
-        if current.get("role") == "user" and (
-            text.startswith("<system-reminder>") or text.startswith("<user_info>")
-        ):
-            current = None
-            tools = []
-            return
+        if current.get("role") == "user":
+            text = visible_user_text(text) or ""
+            current["content"] = text
         if tools:
             current["tools"] = tools[:12]
         if text or current.get("tools"):
@@ -654,6 +735,13 @@ def parse_cli_messages(session_dir: Path) -> list[dict[str, Any]]:
         return messages
     flush()
     return messages
+
+
+def parse_cli_messages(session_dir: Path) -> list[dict[str, Any]]:
+    history = parse_cli_chat_history(session_dir)
+    if history:
+        return history
+    return parse_cli_updates(session_dir)
 
 
 def list_cli_summaries() -> list[dict[str, Any]]:

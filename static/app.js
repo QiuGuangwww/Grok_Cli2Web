@@ -132,6 +132,9 @@ const I18N = {
     "tab.agents": "多 Agent",
     "tab.appearance": "外观",
     "tab.language": "语言",
+    "filter.all": "全部",
+    "filter.web": "网页",
+    "filter.cli": "CLI",
     "lang.help": "选择界面语言。",
     "auth.status": "登录状态",
     "auth.checking": "检查中…",
@@ -304,6 +307,9 @@ const I18N = {
     "tab.agents": "Multi-agent",
     "tab.appearance": "Appearance",
     "tab.language": "Language",
+    "filter.all": "All",
+    "filter.web": "Web",
+    "filter.cli": "CLI",
     "lang.help": "Choose the language for the interface.",
     "auth.status": "Sign-in",
     "auth.checking": "Checking…",
@@ -476,6 +482,9 @@ const I18N = {
     "tab.agents": "マルチエージェント",
     "tab.appearance": "外観",
     "tab.language": "言語",
+    "filter.all": "すべて",
+    "filter.web": "Web",
+    "filter.cli": "CLI",
     "lang.help": "表示言語を選択します。",
     "auth.status": "ログイン状態",
     "auth.checking": "確認中…",
@@ -667,6 +676,7 @@ const state = {
     budget_tokens: 0,
   },
   settingsTab: "account",
+  sourceFilter: "all",
   leftW: Number(localStorage.getItem("grok-left-w")) || 280,
   rightW: Number(localStorage.getItem("grok-right-w")) || 340,
   graphH: Number(localStorage.getItem("grok-graph-h")) || 220,
@@ -699,6 +709,10 @@ const els = {
   slash: $("slash"),
   modeChip: $("modeChip"),
   themePanel: $("themePanel"),
+  langPicker: $("langPicker"),
+  langBtn: $("langBtn"),
+  langLabel: $("langLabel"),
+  langMenu: $("langMenu"),
   authStatus: $("authStatus"),
   apiKey: $("apiKey"),
   sidebar: $("sidebar"),
@@ -867,7 +881,36 @@ function setLang(id, persist = true) {
 }
 
 function cycleLang() {
-  setLang(state.lang === "zh" ? "en" : "zh");
+  const i = LANGS.findIndex((l) => l.id === state.lang);
+  setLang(LANGS[(i + 1) % LANGS.length].id);
+}
+
+function renderLangMenu() {
+  const meta = LANGS.find((l) => l.id === state.lang) || LANGS[0];
+  if (els.langLabel) els.langLabel.textContent = meta.short;
+  if (els.langBtn) els.langBtn.title = t("lang.label");
+  if (!els.langMenu) return;
+  els.langMenu.innerHTML = LANGS.map(
+    (item) => `<button type="button" class="model-option ${item.id === state.lang ? "active" : ""}" data-lang-set="${item.id}" role="option">
+      <span class="name">${escapeHtml(item.name)}</span>
+      <span class="check">${item.id === state.lang ? "✓" : ""}</span>
+    </button>`
+  ).join("");
+}
+
+function openLangMenu() {
+  renderLangMenu();
+  if (!els.langMenu || !els.langPicker) return;
+  els.langMenu.hidden = false;
+  els.langPicker.classList.add("open");
+  els.langBtn?.setAttribute("aria-expanded", "true");
+}
+
+function closeLangMenu() {
+  if (!els.langMenu) return;
+  els.langMenu.hidden = true;
+  els.langPicker?.classList.remove("open");
+  els.langBtn?.setAttribute("aria-expanded", "false");
 }
 
 function applyI18n() {
@@ -885,11 +928,7 @@ function applyI18n() {
   document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
     el.setAttribute("aria-label", t(el.dataset.i18nAria));
   });
-  const langMeta = LANGS.find((l) => l.id === state.lang) || LANGS[0];
-  if ($("langBtn")) {
-    $("langBtn").textContent = langMeta.short;
-    $("langBtn").title = state.lang === "zh" ? "Switch to English" : "切换到中文";
-  }
+  renderLangMenu();
   document.querySelectorAll("[data-lang-set]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.langSet === state.lang);
   });
@@ -2135,11 +2174,21 @@ function dateGroup(iso) {
   return t("date.older");
 }
 
+function setSourceFilter(src) {
+  state.sourceFilter = src || "all";
+  document.querySelectorAll("[data-src]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.src === state.sourceFilter);
+  });
+  renderRecents();
+}
+
 function renderRecents() {
   const q = els.search.value.trim().toLowerCase();
-  const items = state.conversations.filter(
-    (c) => !q || (c.title || "").toLowerCase().includes(q) || (c.preview || "").toLowerCase().includes(q)
-  );
+  const items = state.conversations.filter((c) => {
+    if (state.sourceFilter === "cli" && c.source !== "cli") return false;
+    if (state.sourceFilter === "web" && c.source === "cli") return false;
+    return !q || (c.title || "").toLowerCase().includes(q) || (c.preview || "").toLowerCase().includes(q);
+  });
   if (!items.length) {
     els.recents.innerHTML = `<div class="empty-recents">${q ? t("empty.miss") : t("empty.none")}</div>`;
     return;
@@ -3112,7 +3161,20 @@ function bindEvents() {
   });
   $("langBtn")?.addEventListener("click", (e) => {
     e.stopPropagation();
-    cycleLang();
+    closeModelMenu();
+    closeEffortMenu();
+    if (els.langMenu && els.langMenu.hidden) openLangMenu();
+    else closeLangMenu();
+  });
+  els.langMenu?.addEventListener("click", (e) => {
+    const id = e.target.closest("[data-lang-set]")?.dataset.langSet;
+    if (!id) return;
+    setLang(id);
+    closeLangMenu();
+  });
+  $("srcFilter")?.addEventListener("click", (e) => {
+    const src = e.target.closest("[data-src]")?.dataset.src;
+    if (src) setSourceFilter(src);
   });
   $("closeTheme")?.addEventListener("click", closeThemePanel);
   $("attachBtn").addEventListener("click", () => els.fileInput.click());
@@ -3141,11 +3203,13 @@ function bindEvents() {
     if (!e.target.closest(".menu") && !e.target.closest(".conv-menu")) closeMenu();
     if (!e.target.closest("#modelPicker")) closeModelMenu();
     if (!e.target.closest("#effortPicker")) closeEffortMenu();
+    if (!e.target.closest("#langPicker")) closeLangMenu();
     if (!e.target.closest(".set-picker")) closeSetMenus();
   });
   els.modelBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     closeEffortMenu();
+    closeLangMenu();
     if (els.modelMenu.hidden) openModelMenu();
     else closeModelMenu();
   });
@@ -3156,6 +3220,7 @@ function bindEvents() {
   els.effortBtn?.addEventListener("click", (e) => {
     e.stopPropagation();
     closeModelMenu();
+    closeLangMenu();
     if (els.effortMenu.hidden) openEffortMenu();
     else closeEffortMenu();
   });

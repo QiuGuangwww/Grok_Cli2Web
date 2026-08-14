@@ -68,6 +68,25 @@ Then open [http://127.0.0.1:8787](http://127.0.0.1:8787).
 
 Python 3.13+ is required (Homebrew Python 3.14 `venv` is flaky on some machines). Dependencies install into `.venv` automatically.
 
+### Windows
+
+```powershell
+git clone https://github.com/QiuGuangwww/Grok_Cli2Web.git
+cd Grok_Cli2Web
+.\launch.cmd
+```
+
+Then open [http://127.0.0.1:8787](http://127.0.0.1:8787).
+
+| Script | What it does |
+| --- | --- |
+| `.\launch.cmd` / `.\launch.ps1` | Start in the background (or reuse a running instance) and print the URL |
+| `.\start.cmd` / `.\start.ps1` | Run in the foreground; `Ctrl+C` stops it |
+
+`launch.cmd` / `start.cmd` bypass ExecutionPolicy so you do not need to change system policy. Python 3.13+ is required (`py -3.14` or `py -3.13`). The default `python` on some PCs is 3.10 and will be skipped.
+
+On Windows, `launch.cmd` starts uvicorn through a hidden VBS + WMI process so the server is not killed when the Grok TUI `/web` skill returns.
+
 ## Auth
 
 Credentials are resolved in this order:
@@ -94,9 +113,18 @@ cp -R .grok/skills/web ~/.grok/skills/
 export GROK_CHAT_HOME="$PWD"   # needed if the repo is not at ~/code/grok-chat
 ```
 
+Windows (PowerShell):
+
+```powershell
+New-Item -ItemType Directory -Force "$HOME\.grok\skills" | Out-Null
+Copy-Item -Recurse -Force .\.grok\skills\web "$HOME\.grok\skills\"
+```
+
+`.\launch.cmd` also copies the skill and writes the repo path to `~\.grok\web-chat\home.txt`, so `/web` works from any directory after the first launch. Set `GROK_CHAT_HOME` only if you move the repo.
+
 ## Shortcuts
 
-`Enter` send · `Shift+Enter` newline · `/` commands · `⌘N` new chat · `⌘K` search history
+`Enter` send · `Shift+Enter` newline · `/` commands · `⌘N` / `Ctrl+N` new chat · `⌘K` / `Ctrl+K` search history
 
 Enter during IME composition (for example Chinese pinyin confirm) does not send.
 
