@@ -18,6 +18,9 @@ from typing import Any
 import logging
 
 import httpx
+
+# Windows registry often maps .svg -> image/svg. Browsers only render image/svg+xml.
+mimetypes.add_type("image/svg+xml", ".svg")
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles

@@ -89,11 +89,12 @@ if (-not $already) {
     }
 
     $env:PORT = "$Port"
+    # Do not redirect stdout/stderr: when this script exits, those pipes
+    # close and uvicorn on Windows dies. Hidden window is fully detached.
     $proc = Start-Process -FilePath $venvPy `
         -ArgumentList @((Join-Path $Root "server.py")) `
         -WorkingDirectory $Root `
-        -RedirectStandardOutput $Log `
-        -RedirectStandardError $ErrLog `
+        -WindowStyle Hidden `
         -PassThru
     Set-Content -LiteralPath (Join-Path $Data "server.pid") -Value $proc.Id -Encoding ascii
 
