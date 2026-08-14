@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 470" role="img" aria-label="Multi-agent flow">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 560" role="img" aria-label="Multi-agent flow with Brain, fact contract, and scored review">
   <defs>
     <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M1 1.4L8.4 5 1 8.6z" fill="#8a8478"/>
@@ -14,63 +14,82 @@
     </marker>
   </defs>
 
-  <rect width="880" height="470" rx="20" fill="#fffdf8"/>
-  <rect x="1" y="1" width="878" height="468" rx="19" fill="none" stroke="#e8e2d6"/>
+  <rect width="880" height="560" rx="20" fill="#fffdf8"/>
+  <rect x="1" y="1" width="878" height="558" rx="19" fill="none" stroke="#e8e2d6"/>
 
-  <rect x="372" y="22" width="136" height="36" rx="18" fill="#fff" stroke="#c4bdb0"/>
-  <text x="440" y="45" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="14" fill="#1c1915">You</text>
+  <rect x="372" y="16" width="136" height="34" rx="17" fill="#fff" stroke="#c4bdb0"/>
+  <text x="440" y="38" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="14" fill="#1c1915">You</text>
 
-  <path d="M440 58v22" stroke="#8a8478" stroke-width="1.4" marker-end="url(#arr)"/>
+  <path d="M372 33H96V108H236" fill="none" stroke="#c48432" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#arr-ask)"/>
+  <text x="88" y="64" text-anchor="end" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#c48432">one batched ask</text>
+  <text x="88" y="80" text-anchor="end" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#c48432">not a popup storm</text>
 
-  <rect x="328" y="82" width="224" height="42" rx="12" fill="#f4e4d6" stroke="#c96442"/>
-  <text x="440" y="108" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="14" fill="#1c1915">Lead plans steps</text>
+  <path d="M508 33H784V108H644" fill="none" stroke="#c96442" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#arr-accent)"/>
+  <text x="792" y="64" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#c96442">steer writes back</text>
+  <text x="792" y="80" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#c96442">new plan version</text>
 
-  <path d="M328 103H250V40H368" fill="none" stroke="#c48432" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#arr-ask)"/>
-  <text x="238" y="76" text-anchor="end" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#c48432">ask if unsure</text>
+  <path d="M440 50v18" stroke="#8a8478" stroke-width="1.4" marker-end="url(#arr)"/>
 
-  <path d="M440 124v22" stroke="#8a8478" stroke-width="1.4" marker-end="url(#arr)"/>
+  <rect x="236" y="70" width="408" height="70" rx="14" fill="#f4e4d6" stroke="#c96442"/>
+  <text x="440" y="98" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="15" fill="#1c1915">Brain</text>
+  <text x="440" y="118" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#6b645a">plan vN · fact contract · arbitrate · merge · score</text>
+  <text x="440" y="132" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#8a8478">goal is pinned · later agents never see full essays</text>
 
-  <rect x="148" y="150" width="584" height="104" rx="16" fill="#faf7f1" stroke="#e8e2d6"/>
-  <text x="168" y="170" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#8a8478">one step · several specialists</text>
-  <text x="716" y="170" text-anchor="end" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#8a8478">stall: retry · swap · shrink</text>
+  <path d="M440 140v20" stroke="#8a8478" stroke-width="1.4" marker-end="url(#arr)"/>
 
-  <rect x="176" y="186" width="150" height="38" rx="10" fill="#fff" stroke="#c4bdb0"/>
-  <text x="251" y="210" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="13" fill="#1c1915">Specialist</text>
-  <rect x="346" y="186" width="150" height="38" rx="10" fill="#fff" stroke="#c4bdb0"/>
-  <text x="421" y="210" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="13" fill="#1c1915">Specialist</text>
-  <rect x="516" y="186" width="186" height="38" rx="10" fill="#eef5ee" stroke="#6d8a6a"/>
-  <text x="609" y="210" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="13" fill="#1c1915">Step lead aligns</text>
+  <rect x="108" y="164" width="664" height="132" rx="16" fill="#faf7f1" stroke="#e8e2d6"/>
+  <text x="128" y="184" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#8a8478">one step · several specialists in parallel</text>
+  <text x="752" y="184" text-anchor="end" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#8a8478">stall: retry · swap · shrink</text>
 
-  <path d="M326 205h16" stroke="#3a8f5e" stroke-width="1.5" marker-end="url(#arr-live)"/>
-  <path d="M496 205h16" stroke="#3a8f5e" stroke-width="1.5" marker-end="url(#arr-live)"/>
-  <text x="336" y="242" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#c48432">don’t guess · ask a teammate</text>
+  <rect x="136" y="198" width="150" height="36" rx="10" fill="#fff" stroke="#c4bdb0"/>
+  <text x="211" y="221" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="13" fill="#1c1915">Specialist</text>
+  <rect x="306" y="198" width="150" height="36" rx="10" fill="#fff" stroke="#c4bdb0"/>
+  <text x="381" y="221" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="13" fill="#1c1915">Specialist</text>
+  <rect x="476" y="198" width="264" height="36" rx="10" fill="#eef5ee" stroke="#6d8a6a"/>
+  <text x="608" y="221" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="13" fill="#1c1915">Step lead aligns</text>
 
-  <path d="M440 254v18" stroke="#8a8478" stroke-width="1.4" marker-end="url(#arr)"/>
+  <path d="M286 216h16" stroke="#3a8f5e" stroke-width="1.5" marker-end="url(#arr-live)"/>
+  <path d="M456 216h16" stroke="#3a8f5e" stroke-width="1.5" marker-end="url(#arr-live)"/>
 
-  <rect x="350" y="276" width="180" height="42" rx="12" fill="#fff" stroke="#c4bdb0"/>
-  <text x="440" y="302" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="14" fill="#1c1915">Reviewer</text>
+  <rect x="136" y="248" width="604" height="32" rx="8" fill="#fff" stroke="#d9d2c6"/>
+  <text x="438" y="269" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="12" fill="#1c1915">Filtered contract · claim / source / confidence · Brain settles conflicts</text>
 
-  <path d="M350 297H210v42" fill="none" stroke="#3a8f5e" stroke-width="1.5" marker-end="url(#arr-live)"/>
-  <text x="268" y="290" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#3a8f5e">pass</text>
+  <text x="438" y="288" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#c48432">don’t guess · ask a teammate · similar asks are merged</text>
 
-  <path d="M530 297H670v42" fill="none" stroke="#c48432" stroke-width="1.5" marker-end="url(#arr-ask)"/>
-  <text x="612" y="290" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#c48432">send back</text>
+  <path d="M440 296v20" stroke="#8a8478" stroke-width="1.4" marker-end="url(#arr)"/>
 
-  <rect x="118" y="346" width="184" height="42" rx="12" fill="#eef5ee" stroke="#6d8a6a"/>
-  <text x="210" y="372" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="14" fill="#1c1915">Lead writes answer</text>
+  <rect x="330" y="320" width="220" height="42" rx="12" fill="#fff" stroke="#c4bdb0"/>
+  <text x="440" y="346" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="14" fill="#1c1915">Reviewer</text>
 
-  <rect x="568" y="346" width="204" height="42" rx="12" fill="#f7ecd8" stroke="#c48432"/>
-  <text x="670" y="366" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="13" fill="#1c1915">State machine</text>
-  <text x="670" y="382" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#8a8478">running · sent back · stop</text>
+  <path d="M330 341H200v36" fill="none" stroke="#3a8f5e" stroke-width="1.5" marker-end="url(#arr-live)"/>
+  <text x="258" y="334" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#3a8f5e">pass if score ok</text>
 
-  <path d="M568 367H310" stroke="#3a8f5e" stroke-width="1.4" marker-end="url(#arr-live)"/>
-  <text x="438" y="360" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#3a8f5e">cap or pass</text>
+  <path d="M550 341H680v36" fill="none" stroke="#c48432" stroke-width="1.5" marker-end="url(#arr-ask)"/>
+  <text x="628" y="334" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#c48432">send back</text>
 
-  <path d="M772 367H808V200H706" fill="none" stroke="#c96442" stroke-width="1.5" marker-end="url(#arr-accent)"/>
-  <text x="816" y="288" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#c96442">rework</text>
-  <text x="816" y="304" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#c96442">reuse</text>
+  <rect x="98" y="384" width="204" height="52" rx="12" fill="#eef5ee" stroke="#6d8a6a"/>
+  <text x="200" y="406" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="14" fill="#1c1915">Lead writes answer</text>
+  <text x="200" y="424" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#8a8478">from contract + artifacts</text>
 
-  <path d="M372 40H108V205H172" fill="none" stroke="#c96442" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#arr-accent)"/>
-  <text x="118" y="128" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#c96442">guide while</text>
-  <text x="118" y="144" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#c96442">running</text>
+  <rect x="338" y="390" width="204" height="40" rx="10" fill="#fff" stroke="#e8e2d6"/>
+  <text x="440" y="408" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#6b645a">score · coverage · confidence</text>
+  <text x="440" y="422" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#6b645a">conflicts · acceptance · cap 2</text>
+
+  <rect x="578" y="384" width="204" height="52" rx="12" fill="#f7ecd8" stroke="#c48432"/>
+  <text x="680" y="406" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="14" fill="#1c1915">Rework · reuse agents</text>
+  <text x="680" y="424" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#8a8478">changelog of what changed</text>
+
+  <path d="M338 410H306" stroke="#3a8f5e" stroke-width="1.3" marker-end="url(#arr-live)"/>
+  <path d="M542 410H574" stroke="#c48432" stroke-width="1.3" marker-end="url(#arr-ask)"/>
+
+  <path d="M782 410H816V230H744" fill="none" stroke="#c96442" stroke-width="1.5" marker-end="url(#arr-accent)"/>
+  <text x="824" y="318" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#c96442">rework</text>
+  <text x="824" y="334" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#c96442">same agents</text>
+  <text x="824" y="350" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#c96442">new premises</text>
+
+  <text x="440" y="468" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="12" fill="#6b645a">Ties are contested, not guessed. Human steer updates Brain so the next schedule is not the old plan.</text>
+
+  <rect x="128" y="488" width="624" height="48" rx="12" fill="#fff" stroke="#e8e2d6"/>
+  <text x="440" y="508" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="12" fill="#1c1915">Inspect · live graph · guidance box</text>
+  <text x="440" y="524" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="11" fill="#8a8478">green = working · amber = feedback · drag nodes · empty process hides the button</text>
 </svg>

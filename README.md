@@ -30,21 +30,25 @@ Listens on `127.0.0.1` only · chats stay on disk in `~/.grok/web-chat/`
 
 ## Multi-agent
 
-Composer mode **Multi-agent**. The lead plans a few steps; independent steps run together. A step can have several specialists plus a step lead who aligns them. Later steps reuse the progress board instead of starting over.
+Composer mode **Multi-agent**. The lead plans a few steps; independent steps run together. A step can have several specialists plus a step lead who aligns them. Later steps consume a **filtered fact contract** (claim, source, confidence), not other specialists' essays. The original user goal is pinned and cannot be overwritten by the board.
 
 The slider is a **maximum** headcount (2–144), not a fixed roster. Lead and workers use separate models in settings.
 
 <p align="center">
-  <img src="static/crew.svg" alt="Multi-agent flow: lead plans, specialists run in parallel, reviewer can send work back" width="720" />
+  <img src="static/crew.svg" alt="Multi-agent flow: you talk to Brain, specialists write a filtered fact contract, Brain arbitrates conflicts and scores whether to stop or reuse agents" width="720" />
 </p>
 
-- A **server-side state machine** owns the run: who is running, who was sent back, and when to stop. Reviewer JSON is optional; missing output is decided in code.
-- Stall recovery is layered (retry → swap model → shrink the brief). After that the agent is marked partial and the crew continues. Review send-back is capped at two extra rounds.
-- **Reviewer** can send work back. Extra rounds reuse existing agents.
-- If the lead cannot decide without guessing, it asks you with a `/`-style multiple choice. The last option is always **Other**.
-- Specialists must not invent missing facts. They route uncertainty to the right teammate.
+<p align="center"><em>Brain is the state machine, not another chatting agent. Specialists never share full essays — only a filtered contract.</em></p>
+
+- A **server-side state machine (Brain)** owns the run: plan version, contract, who is running, who was sent back, and when to stop. Reviewer JSON is optional; missing output is decided in code.
+- Stall recovery is layered (retry → swap model → shrink the brief). After that the agent is marked partial and the crew continues.
+- **Reviewer** can send work back. Extra rounds **reuse** existing agents and hand them a changelog of what changed. Two review passes is the hard cap; a score (coverage, confidence, open conflicts, your acceptance points) can stop earlier.
+- If Brain cannot decide without guessing, questions are **batched** into one `/`-style choice. The last option is always **Other**.
+- Specialists must not invent missing facts. They route uncertainty to the right teammate. Later agents only see contract entries tagged for them.
+- **Conflicts** are arbitrated by Brain (higher confidence / sourced claim wins). A true tie is marked contested, not guessed.
+- Guidance you type into a worker is written back into Brain (new plan version + updated brief). Later scheduling follows the correction, not the old plan.
 - While a run is live, click a worker in the team list or the graph and type guidance. Stop marks every live agent as stopped; switching chats closes the team pane so it does not leak into another conversation.
-- Graph: green node = working, green edge = aligning, amber edge = feedback. Nodes can be dragged.
+- Graph: green node = working, green edge = aligning, amber edge = feedback. Nodes can be dragged. **View process** stays hidden when there is nothing to show.
 
 ## Run
 

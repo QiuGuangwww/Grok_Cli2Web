@@ -103,6 +103,8 @@ const I18N = {
     "phase.runningNow": "正在跑",
     "phase.sentBack": "已打回",
     "phase.stop": "停止原因",
+    "phase.planVer": "计划版本",
+    "phase.score": "收敛",
     "inspect.task": "任务",
     "inspect.deps": "依赖",
     "inspect.depsOf": "基于 {names} 继续",
@@ -268,6 +270,8 @@ const I18N = {
     "phase.runningNow": "Running",
     "phase.sentBack": "Sent back",
     "phase.stop": "Stop reason",
+    "phase.planVer": "Plan version",
+    "phase.score": "Convergence",
     "inspect.task": "Task",
     "inspect.deps": "Depends on",
     "inspect.depsOf": "Continues from {names}",
@@ -433,6 +437,8 @@ const I18N = {
     "phase.runningNow": "実行中",
     "phase.sentBack": "差戻し",
     "phase.stop": "停止理由",
+    "phase.planVer": "計画版",
+    "phase.score": "収束",
     "inspect.task": "任務",
     "inspect.deps": "依存",
     "inspect.depsOf": "{names} を引き継いで続行",
@@ -1226,6 +1232,13 @@ function phaseCard(phase) {
   const lines = [label === `phase.${phase.phase}` ? phase.phase : label];
   if (phase.running?.length) lines.push(`${t("phase.runningNow")}：${phase.running.join("、")}`);
   if (phase.sent_back?.length) lines.push(`${t("phase.sentBack")}：${phase.sent_back.join("、")}`);
+  if (phase.plan_version) lines.push(`${t("phase.planVer")}：v${phase.plan_version}`);
+  const sc = phase.score;
+  if (sc && (sc.coverage != null || sc.conflicts != null)) {
+    lines.push(
+      `${t("phase.score")}：cov ${sc.coverage ?? "—"} · conf ${sc.confidence ?? "—"} · conflict ${sc.conflicts ?? "—"} · accept ${sc.acceptance ?? "—"}`
+    );
+  }
   if (phase.stop && phase.phase === "stopped") lines.push(`${t("phase.stop")}：${phase.stop}`);
   return `<div class="inspect-card"><span class="k">${t("inspect.phase")}</span>${lines
     .map((line) => `<div class="ledger-line">${escapeHtml(line)}</div>`)

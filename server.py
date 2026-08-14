@@ -127,9 +127,17 @@ STALL_RE = re.compile(
 FEEDBACK_RULE = (
     "Do not guess missing facts, sources, numbers, or another specialty's work. "
     "If you are uncertain or blocked, ask the matching teammate (search, verify, compute, write, review, etc.). "
-    "After your draft you MAY emit one control JSON object, and only this form: "
-    '{"feedback":[{"to":"agent-id-or-name","ask":"what you need"}]}. '
-    "Omit that JSON if you have no request. The control JSON is for routing, not for the user."
+    "After your draft you MAY emit one control JSON object: "
+    '{"facts":[{"claim":"...","source":"url-or-paper","confidence":"high|medium|low|hypothesis","for":["step-id-or-role"]}],'
+    '"feedback":[{"to":"agent-id-or-name","ask":"..."}]}. '
+    "facts = checkable claims only, not prose. Omit feedback if you have no request. "
+    "The control JSON is for routing, not for the user."
+)
+
+GOAL_PIN = (
+    "IMMUTABLE GOAL — never replace, broaden, or drift from this. "
+    "The contract below is read-only evidence. Hypothesis is not fact. "
+    "If a contract entry conflicts with the goal, keep the goal and flag the conflict."
 )
 
 DEFAULT_TOOLS = [
@@ -268,6 +276,30 @@ def shrink_payload(payload: dict[str, Any]) -> dict[str, Any]:
             inputs.append(msg)
     nxt["input"] = inputs
     return nxt
+
+
+def is_drop_error(exc: BaseException) -> bool:
+    if isinstance(exc, (httpx.RemoteProtocolError, httpx.ReadError, httpx.ConnectError, httpx.WriteError, httpx.TimeoutException)):
+        return True
+    blob = str(exc).lower()
+    return any(
+        key in blob
+        for key in (
+            "incomplete chunked",
+            "peer closed connection",
+            "connection reset",
+            "server disconnected",
+            "remoteprotocolerror",
+            "stream closed",
+        )
+    )
+
+
+def looks_complete(text: str) -> bool:
+    blob = (text or "").strip()
+    if len(blob) < 360:
+        return False
+    return blob[-1] in "。！？.!?」』…)"
 
 
 def next_recovery(payload: dict[str, Any], restarts: int) -> dict[str, Any] | None:
@@ -1163,108 +1195,130 @@ async def xai_stream(token: str, payload: dict[str, Any], restarts: int = 0):
     activity: list[dict[str, Any]] = []
     response_id = None
     stalled = False
-    async with async_client(timeout=httpx.Timeout(3600.0, connect=30.0)) as client:
-        async with client.stream(
-            "POST",
-            f"{XAI_BASE}/responses",
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json=payload,
-        ) as resp:
-            if resp.status_code >= 400:
-                raw = (await resp.aread()).decode("utf-8", errors="replace")
-                msg = extract_error_message(raw)
-                log.warning("xai_stream %s failed: %s", payload.get("model"), msg)
-                model = str(payload.get("model") or "")
-                effort = ""
-                reasoning = payload.get("reasoning")
-                if isinstance(reasoning, dict):
-                    effort = str(reasoning.get("effort") or "")
-                if effort == "xhigh":
-                    payload = {**payload, "reasoning": {"effort": "high"}}
-                    async for ev in xai_stream(token, payload, restarts=restarts):
-                        yield ev
-                    return
-                alt = _fallback_model(model)
-                if alt:
-                    nxt = {**payload, "model": alt}
+    dropped = False
+    try:
+        async with async_client(timeout=httpx.Timeout(3600.0, connect=30.0)) as client:
+            async with client.stream(
+                "POST",
+                f"{XAI_BASE}/responses",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json=payload,
+            ) as resp:
+                if resp.status_code >= 400:
+                    raw = (await resp.aread()).decode("utf-8", errors="replace")
+                    msg = extract_error_message(raw)
+                    log.warning("xai_stream %s failed: %s", payload.get("model"), msg)
+                    model = str(payload.get("model") or "")
+                    effort = ""
+                    reasoning = payload.get("reasoning")
+                    if isinstance(reasoning, dict):
+                        effort = str(reasoning.get("effort") or "")
                     if effort == "xhigh":
-                        nxt["reasoning"] = {"effort": "high"}
-                    async for ev in xai_stream(token, nxt, restarts=restarts):
-                        yield ev
-                    return
-                yield {"type": "error", "message": msg}
-                return
-            buffer = ""
-            async for chunk in resp.aiter_text():
-                buffer += chunk
-                while "\n" in buffer:
-                    line, buffer = buffer.split("\n", 1)
-                    line = line.strip()
-                    if not line.startswith("data:"):
-                        continue
-                    data_str = line[5:].strip()
-                    if not data_str or data_str == "[DONE]":
-                        continue
-                    try:
-                        event = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-                    etype = event.get("type") or ""
-                    if etype == "response.output_text.delta":
-                        delta = event.get("delta") or ""
-                        if delta:
-                            collected.append(delta)
-                            visible = visible_answer("".join(collected))
-                            if loop_detected(visible):
-                                stalled = True
-                                break
-                            if len(visible) > visible_len:
-                                yield {"type": "delta", "text": visible[visible_len:]}
-                                visible_len = len(visible)
-                    elif etype == "response.completed":
-                        response = event.get("response") or {}
-                        response_id = response.get("id") or event.get("id")
-                        for entry in harvest_activity(event):
-                            activity.append(entry)
-                            yield {"type": "activity", "entry": entry}
-                    elif etype in {"response.failed", "error"}:
-                        err = event.get("error") or event.get("response") or event
-                        message = ""
-                        if isinstance(err, dict):
-                            inner = err.get("error")
-                            if isinstance(inner, dict):
-                                message = str(inner.get("message") or "")
-                            else:
-                                message = str(err.get("message") or err)
-                        else:
-                            message = str(err)
-                        yield {"type": "error", "message": message or "生成失败"}
+                        payload = {**payload, "reasoning": {"effort": "high"}}
+                        async for ev in xai_stream(token, payload, restarts=restarts):
+                            yield ev
                         return
-                    else:
-                        item = event.get("item") or {}
-                        note = tool_status(etype, str(item.get("type") or ""))
-                        if note:
-                            yield {"type": "status", "text": note}
-                        for entry in harvest_activity(event):
-                            activity.append(entry)
-                            yield {"type": "activity", "entry": entry}
-                if stalled:
-                    break
-    if stalled:
+                    alt = _fallback_model(model)
+                    if alt:
+                        nxt = {**payload, "model": alt}
+                        if effort == "xhigh":
+                            nxt["reasoning"] = {"effort": "high"}
+                        async for ev in xai_stream(token, nxt, restarts=restarts):
+                            yield ev
+                        return
+                    yield {"type": "error", "message": msg}
+                    return
+                buffer = ""
+                async for chunk in resp.aiter_text():
+                    buffer += chunk
+                    while "\n" in buffer:
+                        line, buffer = buffer.split("\n", 1)
+                        line = line.strip()
+                        if not line.startswith("data:"):
+                            continue
+                        data_str = line[5:].strip()
+                        if not data_str or data_str == "[DONE]":
+                            continue
+                        try:
+                            event = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+                        etype = event.get("type") or ""
+                        if etype == "response.output_text.delta":
+                            delta = event.get("delta") or ""
+                            if delta:
+                                collected.append(delta)
+                                visible = visible_answer("".join(collected))
+                                if loop_detected(visible):
+                                    stalled = True
+                                    break
+                                if len(visible) > visible_len:
+                                    yield {"type": "delta", "text": visible[visible_len:]}
+                                    visible_len = len(visible)
+                        elif etype == "response.completed":
+                            response = event.get("response") or {}
+                            response_id = response.get("id") or event.get("id")
+                            for entry in harvest_activity(event):
+                                activity.append(entry)
+                                yield {"type": "activity", "entry": entry}
+                        elif etype in {"response.failed", "error"}:
+                            err = event.get("error") or event.get("response") or event
+                            message = ""
+                            if isinstance(err, dict):
+                                inner = err.get("error")
+                                if isinstance(inner, dict):
+                                    message = str(inner.get("message") or "")
+                                else:
+                                    message = str(err.get("message") or err)
+                            else:
+                                message = str(err)
+                            yield {"type": "error", "message": message or "生成失败"}
+                            return
+                        else:
+                            item = event.get("item") or {}
+                            note = tool_status(etype, str(item.get("type") or ""))
+                            if note:
+                                yield {"type": "status", "text": note}
+                            for entry in harvest_activity(event):
+                                activity.append(entry)
+                                yield {"type": "activity", "entry": entry}
+                    if stalled:
+                        break
+    except Exception as exc:
+        if not is_drop_error(exc):
+            log.warning("xai_stream exception: %s", exc)
+            yield {"type": "error", "message": str(exc)}
+            return
+        kept = visible_answer("".join(collected))
+        log.warning("xai_stream dropped: %s (kept %s chars)", exc, len(kept))
+        if looks_complete(kept) and not loop_detected(kept):
+            yield {"type": "done", "text": kept, "response_id": response_id, "activity": compact_activity(activity)}
+            return
+        dropped = True
+    if stalled or dropped:
         rec = next_recovery(payload, restarts)
         if rec:
-            yield {"type": "status", "text": rec["label"]}
+            label = rec["label"]
+            if dropped:
+                label = (
+                    "连接中断，正在重试"
+                    if restarts == 0
+                    else "连接仍不稳，换模型再试"
+                    if restarts == 1
+                    else "连接仍不稳，缩小任务再试"
+                )
+            yield {"type": "status", "text": label}
             yield {"type": "reset"}
             async for ev in xai_stream(token, rec["payload"], restarts=restarts + 1):
                 yield ev
             return
-        kept = trim_loop("".join(collected))
+        kept = trim_loop("".join(collected)) if stalled else visible_answer("".join(collected))
         yield {"type": "reset"}
         if kept:
             yield {"type": "delta", "text": kept}
         yield {
             "type": "done",
-            "text": kept or "这一轮陷入空转，已停止。请再试一次。",
+            "text": kept or ("连接中断，已停止。请再试一次。" if dropped else "这一轮陷入空转，已停止。请再试一次。"),
             "response_id": response_id,
             "activity": compact_activity(activity),
             "stalled": True,
@@ -1452,14 +1506,14 @@ def parse_feedback(raw: str) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     if not isinstance(items, list):
         return out
-    for item in items[:4]:
+    for item in items[:8]:
         if not isinstance(item, dict):
             continue
         ask = str(item.get("ask") or item.get("need") or item.get("message") or "").strip()
         to = str(item.get("to") or item.get("agent") or "").strip()
         if ask and to:
             out.append({"to": to, "ask": ask[:400]})
-    return out
+    return merge_feedback(out)
 
 
 def parse_review(raw: str) -> dict[str, Any]:
@@ -1527,6 +1581,12 @@ class CrewState:
         self.review_round = 0
         self.max_review = 2
         self.stop_reason: str | None = None
+        self.plan_version = 1
+        self.plan_notes: list[str] = ["v1: initial plan"]
+        self.briefs: dict[str, str] = {}
+        self.steers: list[dict[str, str]] = []
+        self.acceptance: list[str] = []
+        self.score: dict[str, Any] = {}
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -1537,12 +1597,41 @@ class CrewState:
             "failed": sorted(self.failed),
             "review_round": self.review_round,
             "stop": self.stop_reason,
+            "plan_version": self.plan_version,
+            "score": dict(self.score),
         }
 
     def enter(self, phase: str, running: list[str] | None = None) -> dict[str, Any]:
         self.phase = phase
         self.running = set(running or [])
         return self.snapshot()
+
+    def bump_plan(self, note: str) -> None:
+        self.plan_version += 1
+        self.plan_notes.append(f"v{self.plan_version}: {note.strip()[:200]}")
+
+    def changelog_since(self, version: int) -> str:
+        rows = [line for line in self.plan_notes if line.startswith("v")]
+        later = []
+        for line in self.plan_notes:
+            try:
+                num = int(line.split(":", 1)[0].lstrip("v"))
+            except ValueError:
+                continue
+            if num > version:
+                later.append(line)
+        return "\n".join(later[-6:])
+
+    def record_steer(self, aid: str, note: str) -> None:
+        text = (note or "").strip()[:400]
+        if not text:
+            return
+        self.bump_plan(f"human steered {aid}: {text[:160]}")
+        prev = self.briefs.get(aid, "")
+        self.briefs[aid] = (f"{prev}；" if prev else "") + f"[v{self.plan_version} 纠偏] {text}"
+        self.steers.append({"agent": aid, "note": text, "version": str(self.plan_version)})
+        if len(text) <= 40 and text not in self.acceptance:
+            self.acceptance.append(text)
 
     def mark_sent_back(self, aid: str) -> None:
         if aid and aid not in self.sent_back:
@@ -1559,19 +1648,189 @@ class CrewState:
         return self.snapshot()
 
 
-def decide_review(review: dict[str, Any], raw: str, review_round: int, max_review: int = 2) -> str:
+def token_set(text: str) -> set[str]:
+    blob = (text or "").lower()
+    tokens = set(re.findall(r"[A-Za-z][A-Za-z0-9+\-]{2,}|\d+(?:\.\d+)?", blob))
+    chars = re.findall(r"[一-龥]", blob)
+    for i in range(len(chars) - 1):
+        tokens.add(chars[i] + chars[i + 1])
+    return tokens
+
+
+def token_overlap(left: str, right: str) -> float:
+    a, b = token_set(left), token_set(right)
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def find_conflicts(facts: list[dict[str, Any]]) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    neg = ("不是", "并非", "并不", "没有", "无法", "不能", "不支持", "相反", "冲突", " not ", " no ", "cannot", "unlike")
+    pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    active = [item for item in facts if item.get("status") != "superseded"]
+    for i, left in enumerate(active):
+        for right in active[i + 1 :]:
+            if left.get("owner_id") and left.get("owner_id") == right.get("owner_id"):
+                continue
+            if token_overlap(str(left.get("claim") or ""), str(right.get("claim") or "")) < 0.28:
+                continue
+            blob_l = f" {str(left.get('claim') or '').lower()} "
+            blob_r = f" {str(right.get('claim') or '').lower()} "
+            hit_l = any(key in blob_l or key in str(left.get("claim") or "") for key in neg)
+            hit_r = any(key in blob_r or key in str(right.get("claim") or "") for key in neg)
+            if hit_l != hit_r:
+                pairs.append((left, right))
+    return pairs[:8]
+
+
+def pick_fact_winner(left: dict[str, Any], right: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    rank = {"high": 3, "medium": 2, "low": 1, "hypothesis": 0}
+    ra = rank.get(str(left.get("confidence") or "medium"), 1)
+    rb = rank.get(str(right.get("confidence") or "medium"), 1)
+    if ra != rb:
+        return (left, right) if ra > rb else (right, left)
+    sa, sb = bool(left.get("source")), bool(right.get("source"))
+    if sa != sb:
+        return (left, right) if sa else (right, left)
+    return None
+
+
+def arbitrate_conflicts(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    verdicts: list[dict[str, Any]] = []
+    for left, right in find_conflicts(facts):
+        if left.get("status") == "superseded" or right.get("status") == "superseded":
+            continue
+        picked = pick_fact_winner(left, right)
+        if picked is None:
+            left["status"] = "contested"
+            right["status"] = "contested"
+            verdicts.append(
+                {
+                    "claim": f"冲突未决：{str(left.get('claim') or '')[:80]} vs {str(right.get('claim') or '')[:80]}",
+                    "source": "brain-arbitration",
+                    "confidence": "hypothesis",
+                    "for": [],
+                    "owner": "总控",
+                    "owner_id": "lead",
+                    "status": "contested",
+                }
+            )
+            continue
+        winner, loser = picked
+        loser["status"] = "superseded"
+        winner["status"] = winner.get("status") or "active"
+        verdicts.append(
+            {
+                "claim": str(winner.get("claim") or ""),
+                "source": f"arbitrated over {loser.get('owner') or loser.get('owner_id')}",
+                "confidence": str(winner.get("confidence") or "medium"),
+                "for": list(winner.get("for") or []),
+                "owner": "总控",
+                "owner_id": "lead",
+                "status": "active",
+            }
+        )
+    return verdicts
+
+
+def merge_feedback(items: list[dict[str, str]]) -> list[dict[str, str]]:
+    clusters: list[dict[str, str]] = []
+    for item in items:
+        placed = False
+        for cluster in clusters:
+            if cluster.get("to") == item.get("to") and token_overlap(cluster.get("ask") or "", item.get("ask") or "") >= 0.4:
+                extra = str(item.get("ask") or "")
+                if extra and extra not in cluster["ask"]:
+                    cluster["ask"] = f"{cluster['ask'][:180]} / {extra[:180]}"
+                placed = True
+                break
+        if not placed:
+            clusters.append({"to": str(item.get("to") or ""), "ask": str(item.get("ask") or "")[:400]})
+    return [row for row in clusters if row["to"] and row["ask"]][:4]
+
+
+def merge_asks(asks: list[dict[str, Any]]) -> dict[str, Any] | None:
+    valid = [item for item in asks if item and item.get("question") and item.get("options")]
+    if not valid:
+        return None
+    if len(valid) == 1:
+        return valid[0]
+    labels: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in valid:
+        for opt in item.get("options") or []:
+            key = str(opt.get("label") or "").strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            labels.append(opt)
+            if len(labels) >= 4:
+                break
+        if len(labels) >= 4:
+            break
+    if len(labels) < 2:
+        return valid[0]
+    q = "；".join(str(item.get("question") or "")[:80] for item in valid[:3])
+    return {"question": q[:240], "options": labels[:4]}
+
+
+def coverage_score(facts: list[dict[str, Any]], step_ids: list[str], acceptance: list[str] | None = None) -> dict[str, Any]:
+    active = [item for item in facts if item.get("status") != "superseded"]
+    n = max(len(active), 1)
+    solid = sum(1 for item in active if item.get("confidence") in {"high", "medium"})
+    covered = 0
+    for sid in step_ids:
+        key = str(sid or "").lower()
+        if any(key == str(item.get("step") or "").lower() or key in [str(x).lower() for x in (item.get("for") or [])] for item in active):
+            covered += 1
+    cov = covered / max(len(step_ids), 1) if step_ids else solid / n
+    blob = " ".join(str(item.get("claim") or "") for item in active).lower()
+    checks = [str(x).strip() for x in (acceptance or []) if str(x).strip()]
+    acc = 1.0 if not checks else sum(1 for item in checks if item.lower() in blob) / len(checks)
+    return {
+        "coverage": round(cov, 2),
+        "confidence": round(solid / n, 2),
+        "conflicts": len(find_conflicts(active)),
+        "facts": len(active),
+        "acceptance": round(acc, 2),
+    }
+
+
+def decide_review(
+    review: dict[str, Any],
+    raw: str,
+    review_round: int,
+    max_review: int = 2,
+    score: dict[str, Any] | None = None,
+) -> str:
     if review_round >= max_review:
         return "stop"
-    if review.get("explicit_pass") is True and not review.get("issues") and not review.get("feedback"):
-        return "pass"
-    if review.get("explicit_pass") is False or review.get("issues") or review.get("feedback"):
+    score = score or {}
+    conflicts = int(score.get("conflicts") or 0)
+    cov = float(score.get("coverage") or 1)
+    conf = float(score.get("confidence") or 1)
+    acc = float(score.get("acceptance") or 1)
+    if conflicts > 0:
         return "rework"
+    if acc < 0.5:
+        return "rework"
+    complained = review.get("explicit_pass") is False or bool(review.get("issues")) or bool(review.get("feedback"))
+    if complained:
+        if review_round >= 1 and cov >= 0.8 and conf >= 0.6 and acc >= 0.5:
+            return "pass"
+        return "rework"
+    if review.get("explicit_pass") is True and cov >= 0.34:
+        return "pass"
+    if cov >= 0.67 and conf >= 0.5:
+        return "pass"
     blob = raw or ""
     low = blob.lower()
     if any(key in blob or key in low for key in ("打回", "不足", "缺口", "send back", "not ready", "missing", "incomplete", "不够")):
         return "rework"
     if any(key in blob or key in low for key in ("通过", "可以交", "足够", "lgtm", "looks good")):
         return "pass"
+    if cov < 0.5:
+        return "rework"
     return "pass"
 
 
@@ -1639,6 +1898,9 @@ def push_guidance(run_id: str, agent_id: str, text: str) -> bool:
     if not aid or not note:
         return False
     run["notes"].setdefault(aid, []).append(note)
+    machine = run.get("machine")
+    if isinstance(machine, CrewState):
+        machine.record_steer(aid, note)
     return True
 
 
@@ -1792,6 +2054,172 @@ def pack_ledger(reports: dict[str, dict[str, Any]]) -> tuple[str, list[dict[str,
     return ("\n".join(lines) if lines else "（进度板还是空的）"), entries
 
 
+def parse_facts(raw: str) -> list[dict[str, Any]]:
+    blob = re.search(r"\{[\s\S]*\}", strip_tool_leak(raw) or "")
+    if not blob:
+        return []
+    try:
+        data = json.loads(blob.group(0))
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, dict):
+        return []
+    items = data.get("facts") or data.get("claims") or []
+    if not isinstance(items, list):
+        return []
+    out: list[dict[str, Any]] = []
+    allowed = {"high", "medium", "low", "hypothesis"}
+    for item in items[:12]:
+        if isinstance(item, str) and item.strip():
+            out.append({"claim": item.strip()[:400], "source": "", "confidence": "hypothesis", "for": []})
+            continue
+        if not isinstance(item, dict):
+            continue
+        claim = str(item.get("claim") or item.get("fact") or item.get("text") or "").strip()
+        if not claim:
+            continue
+        conf = str(item.get("confidence") or item.get("conf") or "medium").strip().lower()
+        if conf not in allowed:
+            conf = "medium"
+        targets = []
+        for raw_for in item.get("for") or item.get("steps") or []:
+            tag = str(raw_for or "").strip()
+            if tag and tag not in targets:
+                targets.append(tag[:40])
+        out.append(
+            {
+                "claim": claim[:400],
+                "source": str(item.get("source") or item.get("cite") or "").strip()[:240],
+                "confidence": conf,
+                "for": targets,
+            }
+        )
+    return out
+
+
+def harvest_facts(report: dict[str, Any]) -> list[dict[str, Any]]:
+    facts = parse_facts(str(report.get("content") or ""))
+    owner = str(report.get("name") or report.get("id") or "代理")
+    owner_id = str(report.get("id") or "")
+    step = str(report.get("step") or "")
+    out = []
+    for item in facts:
+        out.append({**item, "owner": owner, "owner_id": owner_id, "step": step, "status": item.get("status") or "active"})
+    return out
+
+
+def commit_facts(board: list[dict[str, Any]], report: dict[str, Any]) -> list[dict[str, Any]]:
+    aid = str(report.get("id") or "")
+    board[:] = [
+        item
+        for item in board
+        if item.get("owner_id") != aid
+        and str(item.get("source") or "") != "brain-arbitration"
+        and not str(item.get("source") or "").startswith("arbitrated over")
+    ]
+    board.extend(harvest_facts(report))
+    for item in board:
+        if item.get("status") in {"superseded", "contested"}:
+            item["status"] = "active"
+    board.extend(arbitrate_conflicts(board))
+    return board
+
+
+def apply_user_choice(machine: CrewState, board: list[dict[str, Any]], choice: str, note: str) -> None:
+    text = (choice or "").strip()
+    if not text:
+        return
+    machine.bump_plan(f"{note}: {text[:160]}")
+    short = text[:80]
+    if short not in machine.acceptance:
+        machine.acceptance.append(short)
+    board.append(
+        {
+            "claim": f"用户选定：{text[:200]}",
+            "source": "user-decision",
+            "confidence": "high",
+            "for": [],
+            "owner": "用户",
+            "owner_id": "user",
+            "status": "active",
+        }
+    )
+
+
+def collect_merged_ask(texts: list[str]) -> dict[str, Any] | None:
+    asks = []
+    for text in texts:
+        item = parse_ask(text)
+        if item:
+            asks.append(item)
+    return merge_asks(asks)
+
+
+def filter_facts(facts: list[dict[str, Any]], viewer: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    facts = [item for item in facts if item.get("status") != "superseded"]
+    if not viewer:
+        return list(facts)
+    sid = str(viewer.get("step") or "").lower()
+    role = str(viewer.get("role") or "").lower()
+    name = str(viewer.get("name") or "").lower()
+    bid = str(viewer.get("id") or "").lower()
+    writer = any(key in f"{name}{bid}{role}" for key in ("write", "成文", "整合", "综述"))
+    out: list[dict[str, Any]] = []
+    for item in facts:
+        if item.get("status") == "superseded":
+            continue
+        targets = [str(x).lower() for x in (item.get("for") or [])]
+        conf = str(item.get("confidence") or "medium")
+        if not targets:
+            if conf in {"high", "medium"}:
+                out.append(item)
+            continue
+        if sid and sid in targets:
+            out.append(item)
+            continue
+        if role and role in targets:
+            out.append(item)
+            continue
+        if any(tag in name or tag in bid or name in tag or bid in tag for tag in targets):
+            out.append(item)
+            continue
+        if writer and conf == "high":
+            out.append(item)
+    return out[:16]
+
+
+def format_contract(facts: list[dict[str, Any]], viewer: dict[str, Any] | None = None) -> str:
+    rows = filter_facts(facts, viewer)
+    if not rows:
+        return "（没有与你相关的已登记条目。不要把空板当成许可去猜。）"
+    lines = [
+        "CONTRACT — read-only evidence. Hypothesis is not fact. Do not change the immutable goal."
+    ]
+    for item in rows:
+        src = item.get("source") or "未标注出处"
+        owner = item.get("owner") or "未知"
+        mark = " [contested]" if item.get("status") == "contested" else ""
+        lines.append(f"- [{item.get('confidence')}] {item.get('claim')}{mark} （{src}；{owner}）")
+    return "\n".join(lines)
+
+
+def pack_contract_ledger(facts: list[dict[str, Any]]) -> tuple[str, list[dict[str, str]]]:
+    text = format_contract(facts)
+    entries: list[dict[str, str]] = []
+    visible = [item for item in facts if item.get("status") != "superseded"]
+    for item in visible[-24:]:
+        tag = item.get("status") if item.get("status") in {"contested"} else item.get("confidence")
+        entries.append(
+            {
+                "id": str(item.get("owner_id") or ""),
+                "name": str(item.get("owner") or "条目"),
+                "note": f"[{tag}] {str(item.get('claim') or '')[:200]}",
+                "status": str(item.get("status") or item.get("confidence") or ""),
+            }
+        )
+    return text, entries
+
+
 def _agent_view(spec: dict[str, Any], **extra: Any) -> dict[str, Any]:
     view = {
         "id": spec.get("id") or extra.get("id") or "agent",
@@ -1827,6 +2255,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
     CREW_RUNS[run_id]["machine"] = machine
     human_lead_notes: list[str] = []
     running_ids: set[str] = set()
+    fact_board: list[dict[str, Any]] = []
     yield {"type": "crew-run", "run_id": run_id}
     yield machine.enter("planning", ["lead"])
 
@@ -1897,6 +2326,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
         yield {"type": "ask", "run_id": run_id, **plan_ask}
         choice = await wait_user_choice(run_id)
         if choice:
+            apply_user_choice(machine, fact_board, choice, "user chose plan direction")
             brief = f"{brief}\n\nUser decision:\n{choice}"
             yield {"type": "status", "text": "已按你的选择重新拆任务"}
             plan_payload["input"][-1] = {"role": "user", "content": brief}
@@ -1980,6 +2410,12 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
     pending_asks: dict[str, list[str]] = {}
     links: list[dict[str, str]] = []
     routed: set[tuple[str, str, str]] = set()
+    seen_version: dict[str, int] = {}
+    for spec in roster_specs:
+        aid = str(spec.get("id") or "")
+        if aid and spec.get("brief"):
+            machine.briefs.setdefault(aid, spec["brief"])
+    machine.briefs.setdefault("lead", plan["lead"])
     for spec in roster_specs:
         role = spec.get("role") or "worker"
         ready = spec.get("step") in first_step_ids and role not in {"reviewer"}
@@ -2034,7 +2470,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                     full = ev.get("message") or "子代理失败"
         except Exception as exc:
             status = "error"
-            full = full or f"子代理失败：{exc}"
+            full = full or ("连接中断，请再试一次" if is_drop_error(exc) else f"子代理失败：{exc}")
         if status in {"error", "partial"}:
             machine.mark_failed(str(spec.get("id") or ""))
         result = _agent_view(spec, role=role, status=status, content=full, activity=activity, model=model, effort=effort)
@@ -2085,15 +2521,51 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
         if not aid or result.get("role") == "lead":
             return
         completed[aid] = result
+        if result.get("role") == "reviewer":
+            return
         for index, item in enumerate(reports):
             if str(item.get("id") or "") == aid:
                 reports[index] = result
-                return
-        if result.get("role") == "reviewer":
-            return
-        reports.append(result)
+                break
+        else:
+            reports.append(result)
+        commit_facts(fact_board, result)
+
+    def step_artifacts() -> list[dict[str, Any]]:
+        arts: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for step in steps:
+            lead_spec = step.get("lead_spec")
+            if lead_spec and lead_spec.get("id") in completed:
+                rec = completed[lead_spec["id"]]
+                aid = str(rec.get("id") or "")
+                if aid and aid not in seen:
+                    seen.add(aid)
+                    arts.append(rec)
+                continue
+            for worker in step.get("workers") or []:
+                rec = completed.get(worker["id"])
+                if not rec:
+                    continue
+                aid = str(rec.get("id") or "")
+                if aid and aid not in seen:
+                    seen.add(aid)
+                    arts.append(rec)
+        return arts
+
+    def pack_artifacts() -> str:
+        arts = step_artifacts()
+        if not arts:
+            return "（尚无步骤产物）"
+        return "\n\n".join(f"### {r.get('name')}\n{r.get('content') or ''}" for r in arts)
 
     def build_worker_payload(spec: dict[str, Any], step: dict[str, Any], board: str, coord: str, extra: str = "") -> dict[str, Any]:
+        contract = format_contract(fact_board, spec)
+        aid = str(spec.get("id") or "")
+        last = seen_version.get(aid, 0)
+        change = machine.changelog_since(last) if last else ""
+        seen_version[aid] = machine.plan_version
+        brief = machine.briefs.get(aid) or spec.get("brief") or ""
         return {
             "model": worker_model,
             "stream": True,
@@ -2105,19 +2577,24 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                     "role": "system",
                     "content": (
                         f"You are sub-agent {spec['name']} in step「{step.get('name') or spec.get('step_name') or ''}」. "
-                        f"{TOOL_RULE} {FEEDBACK_RULE} "
-                        f"Your assignment: {spec['brief']}. "
+                        f"{TOOL_RULE} {FEEDBACK_RULE} {GOAL_PIN} "
+                        f"Plan version v{machine.plan_version}. "
+                        "If a changelog is attached, those premises replaced older ones — do not keep working from stale instructions. "
+                        f"Your assignment: {brief}. "
                         f"Specialists you may ask: {specialist_directory()}. "
-                        "Work in parallel with your step-mates. Reuse the step lead's coordination "
-                        "and the shared progress ledger. Do not write the final combined report."
+                        "Work in parallel with your step-mates. "
+                        "Use only the contract entries relevant to you — not other specialists' essays. "
+                        "Do not write the final combined report."
                     ),
                 },
                 {
                     "role": "user",
                     "content": (
-                        f"User request:\n{brief}\n\nLead plan: {plan['lead']}\n"
+                        f"{GOAL_PIN}\n{question}\n\nLead plan: {machine.briefs.get('lead') or plan['lead']}\n"
                         f"Step coordination:\n{coord or '（无）'}\n"
-                        f"Shared progress ledger:\n{board or '（还没有前序成果）'}"
+                        f"Contract (filtered):\n{contract}"
+                        + (f"\n\nUpdated assignment (authoritative):\n{brief}" if machine.briefs.get(aid) else "")
+                        + (f"\n\nPlan changelog since you last ran:\n{change}" if change else "")
                         + (f"\n\nRequests routed to you:\n{extra}" if extra else "")
                     ),
                 },
@@ -2160,6 +2637,9 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                 stash_ask(tid, str(origin.get("name") or origin.get("id")), item["ask"])
                 continue
             asks.setdefault(tid, []).append(f"- {origin.get('name') or origin.get('id')}: {item['ask']}")
+        for tid, notes in list(asks.items()):
+            merged = merge_feedback([{"to": tid, "ask": note} for note in notes])
+            asks[tid] = [row["ask"] for row in merged] or notes[:1]
         return asks
 
     async def run_guided(spec: dict[str, Any], queue: asyncio.Queue, inflight: set[str]) -> None:
@@ -2295,19 +2775,20 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                     {
                         "role": "system",
                         "content": (
-                            f"You are the step lead for「{step['name']}」. {TOOL_RULE} "
+                            f"You are the step lead for「{step['name']}」. {TOOL_RULE} {GOAL_PIN} "
                             "Write a short coordination note: who does what in parallel, "
-                            "what they should share, when to ask another specialist instead of guessing, "
+                            "what contract fields they should emit, when to ask another specialist instead of guessing, "
                             "and when this step is done. No final product."
                         ),
                     },
                     {
                         "role": "user",
                         "content": (
-                            f"User request:\n{brief}\n\nLead plan: {plan['lead']}\n"
+                            f"{GOAL_PIN}\n{question}\n\nLead plan: {machine.briefs.get('lead') or plan['lead']}\n"
+                            f"Plan version: v{machine.plan_version}\n"
                             f"Step: {step['name']} — {step.get('brief')}\n"
                             f"Workers: {', '.join(w['name'] + ': ' + w['brief'] for w in workers)}\n"
-                            f"Progress ledger:\n{board or '（空）'}"
+                            f"Contract:\n{format_contract(fact_board)}"
                         ),
                     },
                 ],
@@ -2323,6 +2804,9 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                 routed_asks = await collect_routes(spec, str(result.get("content") or ""), workers, queue)
                 for tid, notes in routed_asks.items():
                     follow.setdefault(tid, []).extend(notes)
+            for tid, notes in list(follow.items()):
+                merged = merge_feedback([{"to": tid, "ask": note} for note in notes])
+                follow[tid] = [row["ask"] for row in merged] or notes[:1]
             if not follow:
                 break
             extra_by_id: dict[str, str] = {}
@@ -2359,16 +2843,16 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                     {
                         "role": "system",
                         "content": (
-                            f"You are the step lead for「{step['name']}」. {TOOL_RULE} "
+                            f"You are the step lead for「{step['name']}」. {TOOL_RULE} {GOAL_PIN} {FEEDBACK_RULE} "
                             "Align the parallel workers: resolve conflicts, keep facts, "
-                            "carry forward any unanswered specialist requests, "
-                            "write a concise step report for later steps. Not the final user answer."
+                            "emit contract facts for later steps. Later specialists will NOT see these essays — only your facts. "
+                            "Not the final user answer."
                         ),
                     },
                     {
                         "role": "user",
                         "content": (
-                            f"User request:\n{brief}\nCoordination:\n{coord}\n\nWorker reports:\n{packed}"
+                            f"{GOAL_PIN}\n{question}\nCoordination:\n{coord}\n\nWorker reports (this step only):\n{packed}"
                         ),
                     },
                 ],
@@ -2429,7 +2913,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
             live_ids.extend(w["id"] for w in step.get("workers") or [])
         yield machine.enter("running", live_ids)
         yield {"type": "status", "text": f"第 {index + 1}/{len(step_waves)} 波步骤并行：{'、'.join(names)}"}
-        ledger_text, ledger_entries = pack_ledger(completed)
+        ledger_text, ledger_entries = pack_contract_ledger(fact_board)
         yield {"type": "ledger", "wave": index + 1, "waves": len(step_waves), "text": ledger_text, "entries": ledger_entries}
         later = [s for w in step_waves[index + 1 :] for s in w]
         later_ids = {s["id"] for s in later}
@@ -2451,8 +2935,30 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
             for spec in [step.get("lead_spec"), *step.get("workers", [])]:
                 if spec and spec["id"] in completed:
                     upsert_report(completed[spec["id"]])
-        ledger_text, ledger_entries = pack_ledger(completed)
+        machine.score = coverage_score(fact_board, [s["id"] for s in steps], machine.acceptance)
+        yield machine.snapshot()
+        ledger_text, ledger_entries = pack_contract_ledger(fact_board)
         yield {"type": "ledger", "wave": index + 1, "waves": len(step_waves), "text": ledger_text, "entries": ledger_entries}
+        wave_texts = []
+        for step in wave:
+            for spec in [step.get("lead_spec"), *step.get("workers", [])]:
+                if spec and spec["id"] in completed:
+                    wave_texts.append(str((completed.get(spec["id"]) or {}).get("content") or ""))
+        merged_ask = collect_merged_ask(wave_texts)
+        if merged_ask:
+            yield machine.enter("asking", ["lead"])
+            yield {"type": "status", "text": "多位专员的疑问已合并，请选一次"}
+            yield {"type": "ask", "run_id": run_id, **merged_ask}
+            choice = await wait_user_choice(run_id)
+            if choice:
+                apply_user_choice(machine, fact_board, choice, "user answered merged ask")
+                later_ids = {s["id"] for w in step_waves[index + 1 :] for s in w}
+                for spec in roster_specs:
+                    if spec.get("step") in later_ids:
+                        stash_ask(str(spec["id"]), "用户", f"已选定：{choice}")
+                yield {"type": "status", "text": "已按你的选择继续"}
+                machine.score = coverage_score(fact_board, [s["id"] for s in steps], machine.acceptance)
+                yield machine.snapshot()
 
     async for ev in flush_guidance():
         yield ev
@@ -2472,7 +2978,10 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                 effort=plan_effort,
             ),
         }
-        packed_now = "\n\n".join(f"### {r.get('name')}\n{r.get('content') or ''}" for r in reports)
+        packed_now = pack_artifacts()
+        machine.score = coverage_score(fact_board, [s["id"] for s in steps], machine.acceptance)
+        yield machine.snapshot()
+        score = machine.score
         review_payload = {
             "model": lead_model,
             "stream": True,
@@ -2485,6 +2994,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                     "content": (
                         f"You are the reviewer. {TOOL_RULE} "
                         "You may send work back to the lead. Do not invent missing work or write the final user answer. "
+                        "The score below is the stop rule: if coverage>=0.67, conflicts=0, and acceptance>=0.5, prefer pass. "
                         "After a short critique, emit control JSON: "
                         '{"pass":false,"issues":["..."],"feedback":[{"to":"lead","ask":"..."}],"notes":"..."}. '
                         'If the work is good enough: {"pass":true,"notes":"..."}.'
@@ -2493,8 +3003,11 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                 {
                     "role": "user",
                     "content": (
-                        f"User request:\n{brief}\n\nLead plan: {plan['lead']}\n"
-                        f"Progress ledger:\n{ledger_text}\n\nSub-agent reports:\n{packed_now}"
+                        f"{GOAL_PIN}\n{question}\n\nLead plan: {machine.briefs.get('lead') or plan['lead']}\n"
+                        f"Score: coverage={score.get('coverage')} confidence={score.get('confidence')} "
+                        f"conflicts={score.get('conflicts')} acceptance={score.get('acceptance')}\n"
+                        f"Plan v{machine.plan_version}\n"
+                        f"Contract:\n{format_contract(fact_board)}\n\nStep artifacts:\n{packed_now}"
                     ),
                 },
             ],
@@ -2507,6 +3020,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
             yield ev
         review_raw = str((review_result or {}).get("content") or "")
         review = parse_review(review_raw)
+        review["feedback"] = merge_feedback(review.get("feedback") or [])
         review_notes = review.get("notes") or review_notes
         for item in review.get("feedback") or []:
             target = resolve_agent(item["to"], roster_specs) or {
@@ -2518,16 +3032,17 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
             if target.get("id") and target.get("id") != "lead":
                 stash_ask(str(target["id"]), str(reviewer_spec.get("name") or "审核"), item["ask"])
                 machine.mark_sent_back(str(target["id"]))
-        verdict = decide_review(review, review_raw, review_round, machine.max_review)
+        verdict = decide_review(review, review_raw, review_round, machine.max_review, machine.score)
         if verdict == "pass":
-            yield {"type": "status", "text": "审核通过，交总控汇总"}
+            yield {"type": "status", "text": f"审核通过（覆盖 {score.get('coverage')} / 冲突 {score.get('conflicts')}），交总控汇总"}
             break
         if verdict == "stop":
             yield machine.stop("max-rework")
             yield {"type": "status", "text": "已达返工上限，转入汇总"}
             break
+        machine.bump_plan(f"review send-back: {(review_notes or 'gaps')[:160]}")
         assigns = machine_assigns(review, roster_specs, completed, machine.sent_back)
-        yield {"type": "status", "text": "审核打回，状态机决定复用已有子代理"}
+        yield {"type": "status", "text": f"审核打回（覆盖 {score.get('coverage')} / 冲突 {score.get('conflicts')}），复用已有子代理"}
         yield {"type": "link", **remember_link(reviewer_spec["id"], "lead", "review")}
         reused: list[dict[str, Any]] = []
         extra_by_id: dict[str, str] = {}
@@ -2535,7 +3050,11 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
             spec = resolve_agent(item.get("id") or "", roster_specs)
             if not spec or spec.get("role") in {"lead", "reviewer"}:
                 continue
-            extra_by_id[str(spec["id"])] = item.get("brief") or ""
+            brief = item.get("brief") or ""
+            extra_by_id[str(spec["id"])] = brief
+            if brief:
+                prev = machine.briefs.get(str(spec["id"]), "")
+                machine.briefs[str(spec["id"])] = (f"{prev}；" if prev else "") + f"[v{machine.plan_version} 返工] {brief}"
             reused.append(spec)
             machine.mark_sent_back(str(spec["id"]))
             yield {
@@ -2606,7 +3125,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                     if ev.get("type") == "_done":
                         continue
                     yield ev
-        ledger_text, ledger_entries = pack_ledger(completed)
+        ledger_text, ledger_entries = pack_contract_ledger(fact_board)
         yield {"type": "ledger", "wave": review_round + 1, "waves": 3, "text": ledger_text, "entries": ledger_entries}
 
     async for ev in flush_guidance():
@@ -2628,7 +3147,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
             effort=lead_effort,
         ),
     }
-    packed = "\n\n".join(f"### {r.get('name')}\n{r.get('content') or ''}" for r in reports)
+    packed = pack_artifacts()
     reviewer_report = completed.get(str(reviewer_spec.get("id") or "reviewer")) or {}
     synth_payload = {
         "model": lead_model,
@@ -2637,12 +3156,15 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
         "tools": list(DEFAULT_TOOLS),
         "reasoning": {"effort": lead_effort},
         "input": [
-            {"role": "system", "content": f"{MODE_PROMPTS['multi']} {TOOL_RULE} {ASK_RULE}"},
+            {"role": "system", "content": f"{MODE_PROMPTS['multi']} {TOOL_RULE} {ASK_RULE} {GOAL_PIN}"},
             {
                 "role": "user",
                 "content": (
-                    f"User request:\n{brief}\n\nLead plan: {plan['lead']}\n\n"
-                    f"Progress ledger:\n{ledger_text}\n\nSub-agent reports:\n{packed}\n\n"
+                    f"{GOAL_PIN}\n{question}\n\nLead plan: {machine.briefs.get('lead') or plan['lead']}\n"
+                    f"Plan version: v{machine.plan_version}\n"
+                    f"{machine.changelog_since(1)}\n"
+                    f"Score: {machine.score}\n\n"
+                    f"Contract:\n{format_contract(fact_board)}\n\nStep artifacts:\n{packed}\n\n"
                     f"Reviewer notes: {review_notes or (reviewer_report.get('content') or '（无）')}"
                     + (
                         f"\n\nHuman guidance for the lead:\n" + "\n".join(f"- {n}" for n in human_lead_notes)
@@ -2686,6 +3208,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
         yield {"type": "ask", "run_id": run_id, **synth_ask}
         choice = await wait_user_choice(run_id)
         if choice:
+            apply_user_choice(machine, fact_board, choice, "user chose synthesis direction")
             yield {"type": "status", "text": "已按你的选择继续汇总"}
             yield {
                 "type": "agent",

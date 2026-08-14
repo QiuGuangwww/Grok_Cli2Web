@@ -2,11 +2,26 @@ import unittest
 
 from server import (
     CrewState,
+    apply_user_choice,
+    arbitrate_conflicts,
     attach_human_notes,
+    collect_merged_ask,
+    commit_facts,
+    CREW_RUNS,
+    coverage_score,
+    filter_facts,
+    find_conflicts,
+    format_contract,
+    harvest_facts,
+    parse_facts,
     close_crew_run,
     decide_review,
+    is_drop_error,
+    looks_complete,
     loop_detected,
     machine_assigns,
+    merge_asks,
+    merge_feedback,
     next_recovery,
     open_crew_run,
     parse_ask,
@@ -111,6 +126,32 @@ class LeakTests(unittest.TestCase):
         self.assertEqual(stopped["phase"], "stopped")
         self.assertEqual(stopped["stop"], "max-rework")
 
+    def test_drop_error_and_complete(self):
+        self.assertTrue(is_drop_error(RuntimeError("peer closed connection without sending complete message body (incomplete chunked read)")))
+        self.assertFalse(is_drop_error(RuntimeError("bad request")))
+        self.assertTrue(looks_complete("这段已经写完，可以交给后面步骤。" * 30))
+        self.assertFalse(looks_complete("正在检索"))
+
+    def test_parse_and_filter_facts(self):
+        facts = parse_facts(
+            '稿\n{"facts":[{"claim":"RT-2 uses PaLM-E","source":"arxiv:2307","confidence":"high","for":["write"]},'
+            '{"claim":"maybe 1e9 demos","confidence":"hypothesis","for":["algo"]}]}'
+        )
+        self.assertEqual(len(facts), 2)
+        writer = filter_facts(
+            harvest_facts({"content": '{"facts":[{"claim":"RT-2 uses PaLM-E","confidence":"high","for":["write"]}]}', "name": "调研", "id": "a"}),
+            {"id": "write", "name": "成文", "role": "worker", "step": "write"},
+        )
+        self.assertEqual(writer[0]["claim"], "RT-2 uses PaLM-E")
+        algo = filter_facts(
+            [{"claim": "RT-2 uses PaLM-E", "confidence": "high", "for": ["write"], "owner": "调研"}],
+            {"id": "algo", "name": "算法", "role": "worker", "step": "algo"},
+        )
+        self.assertEqual(algo, [])
+        text = format_contract([{"claim": "ok", "confidence": "high", "source": "p", "owner": "调研"}])
+        self.assertIn("[high]", text)
+        self.assertIn("ok", text)
+
     def test_recovery_layers(self):
         self.assertEqual(recover_model("grok-4.6"), "grok-4.5")
         payload = {"model": "grok-4.6", "reasoning": {"effort": "high"}, "input": [{"role": "system", "content": "s"}, {"role": "user", "content": "task"}]}
@@ -172,6 +213,112 @@ class LeakTests(unittest.TestCase):
         user = payload["input"][1]["content"]
         self.assertIn("任务", user)
         self.assertIn("先看召回", user)
+
+    def test_conflict_arbitration(self):
+        facts = [
+            {"claim": "模型不支持 tool use", "source": "", "confidence": "low", "owner_id": "a", "status": "active"},
+            {"claim": "模型支持 tool use", "source": "docs.x.ai", "confidence": "high", "owner_id": "b", "status": "active"},
+        ]
+        pairs = find_conflicts(facts)
+        self.assertEqual(len(pairs), 1)
+        verdicts = arbitrate_conflicts(facts)
+        self.assertTrue(any(item.get("status") == "superseded" for item in facts))
+        self.assertTrue(any("arbitrated" in str(item.get("source") or "") for item in verdicts))
+        even = [
+            {"claim": "A 不是最优", "confidence": "medium", "owner_id": "a", "status": "active"},
+            {"claim": "A 是最优", "confidence": "medium", "owner_id": "b", "status": "active"},
+        ]
+        tied = arbitrate_conflicts(even)
+        self.assertTrue(all(item.get("status") == "contested" for item in even))
+        self.assertTrue(any(item.get("status") == "contested" for item in tied))
+
+    def test_commit_facts_replaces_owner_and_arbitrates(self):
+        board = []
+        commit_facts(
+            board,
+            {"id": "a", "name": "甲", "content": '{"facts":[{"claim":"接口不支持流式","confidence":"low"}]}'},
+        )
+        commit_facts(
+            board,
+            {
+                "id": "b",
+                "name": "乙",
+                "content": '{"facts":[{"claim":"接口支持流式","source":"doc","confidence":"high"}]}',
+            },
+        )
+        self.assertTrue(any(item.get("status") == "superseded" for item in board))
+        self.assertTrue(any(item.get("source", "").startswith("arbitrated") for item in board))
+        text = format_contract(board)
+        self.assertNotIn("不支持流式", text)
+        self.assertIn("支持流式", text)
+
+    def test_merge_feedback_and_asks(self):
+        merged = merge_feedback(
+            [
+                {"to": "cite", "ask": "核对论文出处"},
+                {"to": "cite", "ask": "核对一下论文出处"},
+                {"to": "algo", "ask": "补一组召回指标"},
+            ]
+        )
+        self.assertEqual(len(merged), 2)
+        asks = merge_asks(
+            [
+                {
+                    "question": "更偏召回还是精度？",
+                    "options": [{"id": "a", "label": "召回"}, {"id": "b", "label": "精度"}],
+                },
+                {
+                    "question": "覆盖优先还是准确优先？",
+                    "options": [{"id": "c", "label": "覆盖"}, {"id": "d", "label": "准确"}],
+                },
+            ]
+        )
+        self.assertIn("召回", asks["question"] + "".join(o["label"] for o in asks["options"]))
+        self.assertLessEqual(len(asks["options"]), 4)
+        one = collect_merged_ask(
+            [
+                '{"ask":{"question":"选方向","options":["先搜","先写"]}}',
+                '{"ask":{"question":"怎么推进","options":["先搜","先改"]}}',
+            ]
+        )
+        self.assertEqual(len(one["options"]), 3)
+
+    def test_coverage_score_and_convergence(self):
+        facts = [
+            {"claim": "覆盖 explore", "confidence": "high", "for": ["explore"], "status": "active"},
+            {"claim": "覆盖 write", "confidence": "medium", "for": ["write"], "status": "active"},
+        ]
+        score = coverage_score(facts, ["explore", "write"], ["覆盖 explore"])
+        self.assertGreaterEqual(score["coverage"], 0.9)
+        self.assertEqual(score["conflicts"], 0)
+        self.assertGreaterEqual(score["acceptance"], 0.9)
+        review = {"explicit_pass": False, "issues": ["还差一点"], "feedback": [{"to": "algo", "ask": "再补"}]}
+        self.assertEqual(decide_review(review, "", 0, 2, score), "rework")
+        self.assertEqual(decide_review(review, "", 1, 2, {**score, "confidence": 0.7}), "pass")
+        conflicted = {**score, "conflicts": 1}
+        self.assertEqual(decide_review({"explicit_pass": True, "issues": [], "feedback": []}, "", 0, 2, conflicted), "rework")
+        self.assertEqual(decide_review(review, "", 2, 2, score), "stop")
+
+    def test_plan_version_and_steer_sync(self):
+        state = CrewState("r2")
+        self.assertEqual(state.plan_version, 1)
+        state.briefs["algo"] = "先建基线"
+        state.record_steer("algo", "改成先看召回")
+        self.assertEqual(state.plan_version, 2)
+        self.assertIn("纠偏", state.briefs["algo"])
+        self.assertIn("先看召回", state.changelog_since(1))
+        self.assertEqual(state.changelog_since(2), "")
+        self.assertIn("改成先看召回", state.acceptance)
+        board = []
+        apply_user_choice(state, board, "先覆盖再精修", "user answered")
+        self.assertEqual(state.plan_version, 3)
+        self.assertEqual(board[0]["source"], "user-decision")
+        run_id = open_crew_run()
+        CREW_RUNS[run_id]["machine"] = state
+        self.assertTrue(push_guidance(run_id, "write", "不要扩写成终稿"))
+        self.assertIn("不要扩写成终稿", state.briefs["write"])
+        self.assertGreaterEqual(state.plan_version, 4)
+        close_crew_run(run_id)
 
 
 if __name__ == "__main__":
