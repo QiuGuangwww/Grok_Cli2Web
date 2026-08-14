@@ -677,6 +677,10 @@ const els = {
   slash: $("slash"),
   modeChip: $("modeChip"),
   themePanel: $("themePanel"),
+  langPicker: $("langPicker"),
+  langBtn: $("langBtn"),
+  langLabel: $("langLabel"),
+  langMenu: $("langMenu"),
   authStatus: $("authStatus"),
   apiKey: $("apiKey"),
   sidebar: $("sidebar"),
@@ -845,7 +849,36 @@ function setLang(id, persist = true) {
 }
 
 function cycleLang() {
-  setLang(state.lang === "zh" ? "en" : "zh");
+  const i = LANGS.findIndex((l) => l.id === state.lang);
+  setLang(LANGS[(i + 1) % LANGS.length].id);
+}
+
+function renderLangMenu() {
+  const meta = LANGS.find((l) => l.id === state.lang) || LANGS[0];
+  if (els.langLabel) els.langLabel.textContent = meta.short;
+  if (els.langBtn) els.langBtn.title = t("lang.label");
+  if (!els.langMenu) return;
+  els.langMenu.innerHTML = LANGS.map(
+    (item) => `<button type="button" class="model-option ${item.id === state.lang ? "active" : ""}" data-lang-set="${item.id}" role="option">
+      <span class="name">${escapeHtml(item.name)}</span>
+      <span class="check">${item.id === state.lang ? "✓" : ""}</span>
+    </button>`
+  ).join("");
+}
+
+function openLangMenu() {
+  renderLangMenu();
+  if (!els.langMenu || !els.langPicker) return;
+  els.langMenu.hidden = false;
+  els.langPicker.classList.add("open");
+  els.langBtn?.setAttribute("aria-expanded", "true");
+}
+
+function closeLangMenu() {
+  if (!els.langMenu) return;
+  els.langMenu.hidden = true;
+  els.langPicker?.classList.remove("open");
+  els.langBtn?.setAttribute("aria-expanded", "false");
 }
 
 function applyI18n() {
@@ -863,11 +896,7 @@ function applyI18n() {
   document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
     el.setAttribute("aria-label", t(el.dataset.i18nAria));
   });
-  const langMeta = LANGS.find((l) => l.id === state.lang) || LANGS[0];
-  if ($("langBtn")) {
-    $("langBtn").textContent = langMeta.short;
-    $("langBtn").title = state.lang === "zh" ? "Switch to English" : "切换到中文";
-  }
+  renderLangMenu();
   document.querySelectorAll("[data-lang-set]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.langSet === state.lang);
   });
@@ -3040,7 +3069,16 @@ function bindEvents() {
   });
   $("langBtn")?.addEventListener("click", (e) => {
     e.stopPropagation();
-    cycleLang();
+    closeModelMenu();
+    closeEffortMenu();
+    if (els.langMenu && els.langMenu.hidden) openLangMenu();
+    else closeLangMenu();
+  });
+  els.langMenu?.addEventListener("click", (e) => {
+    const id = e.target.closest("[data-lang-set]")?.dataset.langSet;
+    if (!id) return;
+    setLang(id);
+    closeLangMenu();
   });
   $("closeTheme")?.addEventListener("click", closeThemePanel);
   $("attachBtn").addEventListener("click", () => els.fileInput.click());
@@ -3069,6 +3107,7 @@ function bindEvents() {
     if (!e.target.closest(".menu") && !e.target.closest(".conv-menu")) closeMenu();
     if (!e.target.closest("#modelPicker")) closeModelMenu();
     if (!e.target.closest("#effortPicker")) closeEffortMenu();
+    if (!e.target.closest("#langPicker")) closeLangMenu();
     if (!e.target.closest(".set-picker")) closeSetMenus();
   });
   els.modelBtn.addEventListener("click", (e) => {

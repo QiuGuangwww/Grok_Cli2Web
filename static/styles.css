@@ -1004,6 +1004,34 @@ button {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex: 0 0 auto;
+}
+
+.lang-picker .lang-btn {
+  gap: 2px;
+  padding: 0 6px 0 12px;
+}
+
+.lang-picker .lang-btn svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+}
+
+.lang-picker.open .lang-btn {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.lang-menu {
+  left: auto;
+  right: 0;
+  min-width: 148px;
+}
+
+.lang-menu .model-option {
+  align-items: center;
+  padding: 8px 12px;
 }
 
 .icon-btn {
