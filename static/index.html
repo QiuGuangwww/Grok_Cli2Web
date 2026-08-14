@@ -20,7 +20,7 @@
       id="hl-dark"
       disabled
     />
-    <link rel="stylesheet" href="/assets/styles.css?v=53" />
+    <link rel="stylesheet" href="/assets/styles.css?v=55" />
     <style>
       .drop-overlay,
       #dropOverlay {
@@ -61,6 +61,11 @@
             <path d="M16 16l5 5" />
           </svg>
           <input id="search" type="search" data-i18n-placeholder="search.placeholder" placeholder="搜索对话" autocomplete="off" />
+        </div>
+        <div class="src-filter" id="srcFilter">
+          <button type="button" class="src-chip active" data-src="all" data-i18n="filter.all">全部</button>
+          <button type="button" class="src-chip" data-src="web" data-i18n="filter.web">网页</button>
+          <button type="button" class="src-chip" data-src="cli" data-i18n="filter.cli">CLI</button>
         </div>
 
         <nav class="recents" id="recents"></nav>
@@ -107,7 +112,15 @@
             <div class="model-menu" id="effortMenu" hidden role="listbox"></div>
           </div>
           <div class="topbar-right">
-            <button class="ghost-btn" id="langBtn" type="button" title="中 / EN">中文</button>
+            <div class="model-picker lang-picker" id="langPicker">
+              <button class="ghost-btn lang-btn" id="langBtn" type="button" aria-haspopup="listbox" aria-expanded="false" data-i18n-title="lang.label" title="语言">
+                <span id="langLabel">中文</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                  <path d="M7 9.5 12 14.5 17 9.5" />
+                </svg>
+              </button>
+              <div class="model-menu lang-menu" id="langMenu" hidden role="listbox"></div>
+            </div>
             <button class="ghost-btn" id="themeBtn" type="button" data-i18n="appearance">外观</button>
           </div>
         </header>
@@ -369,6 +382,6 @@
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.5/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/common.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js"></script>
-    <script src="/assets/app.js?v=57"></script>
+    <script src="/assets/app.js?v=59"></script>
   </body>
 </html>

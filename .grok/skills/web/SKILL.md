@@ -11,7 +11,32 @@ metadata:
 
 # /web
 
-Start the local chat UI. Do not ask questions. Do not run `start.sh` in the foreground.
+Start the local chat UI. Do not ask questions. Do not run `start.sh` or `start.ps1` in the foreground.
+
+## Windows (PowerShell / pwsh / cmd)
+
+Run this with the terminal tool:
+
+```powershell
+$root = $env:GROK_CHAT_HOME
+if (-not $root) {
+  $homeFile = Join-Path $HOME ".grok\web-chat\home.txt"
+  if (Test-Path -LiteralPath $homeFile) {
+    $root = (Get-Content -LiteralPath $homeFile -Raw).Trim()
+  }
+}
+if (-not $root) {
+  if (Test-Path -LiteralPath ".\launch.cmd") { $root = (Resolve-Path ".").Path }
+  elseif (Test-Path -LiteralPath "$HOME\Grok_Cli2Web\launch.cmd") { $root = "$HOME\Grok_Cli2Web" }
+  elseif (Test-Path -LiteralPath "$HOME\code\grok-chat\launch.sh") { $root = "$HOME\code\grok-chat" }
+}
+if (-not $root) { throw "set GROK_CHAT_HOME to the Grok_Cli2Web repo" }
+& "$root\launch.cmd"
+```
+
+Reply with the printed URL.
+
+## macOS / Linux / Git Bash
 
 ```bash
 ROOT="${GROK_CHAT_HOME:-}"

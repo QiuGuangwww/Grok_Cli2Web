@@ -132,6 +132,9 @@ const I18N = {
     "tab.agents": "多 Agent",
     "tab.appearance": "外观",
     "tab.language": "语言",
+    "filter.all": "全部",
+    "filter.web": "网页",
+    "filter.cli": "CLI",
     "lang.help": "选择界面语言。",
     "auth.status": "登录状态",
     "auth.checking": "检查中…",
@@ -189,7 +192,8 @@ const I18N = {
     "empty.none": "还没有对话",
     "empty.miss": "没有匹配的对话",
     "origin.cli": "来自 Grok CLI",
-    "origin.cont": "，可在此继续",
+    "origin.cont": " · 只读",
+    "origin.readonly": "CLI 对话只读。网页存在 ~/.grok/web-chat，CLI 存在 ~/.grok/sessions，请在终端里继续。",
     thinking: "思考中",
     "view.process": "查看过程",
     "view.team": "查看团队",
@@ -304,6 +308,9 @@ const I18N = {
     "tab.agents": "Multi-agent",
     "tab.appearance": "Appearance",
     "tab.language": "Language",
+    "filter.all": "All",
+    "filter.web": "Web",
+    "filter.cli": "CLI",
     "lang.help": "Choose the language for the interface.",
     "auth.status": "Sign-in",
     "auth.checking": "Checking…",
@@ -361,7 +368,8 @@ const I18N = {
     "empty.none": "No chats yet",
     "empty.miss": "No matching chats",
     "origin.cli": "From Grok CLI",
-    "origin.cont": ". You can continue here",
+    "origin.cont": " · read-only",
+    "origin.readonly": "CLI chats are read-only. Web chats live in ~/.grok/web-chat; CLI chats live in ~/.grok/sessions. Continue in the Grok CLI.",
     thinking: "Thinking",
     "view.process": "View process",
     "view.team": "View team",
@@ -476,6 +484,9 @@ const I18N = {
     "tab.agents": "マルチエージェント",
     "tab.appearance": "外観",
     "tab.language": "言語",
+    "filter.all": "すべて",
+    "filter.web": "Web",
+    "filter.cli": "CLI",
     "lang.help": "表示言語を選択します。",
     "auth.status": "ログイン状態",
     "auth.checking": "確認中…",
@@ -533,7 +544,8 @@ const I18N = {
     "empty.none": "まだ会話がありません",
     "empty.miss": "一致する会話がありません",
     "origin.cli": "Grok CLI から",
-    "origin.cont": "。ここで続行できます",
+    "origin.cont": " · 読み取り専用",
+    "origin.readonly": "CLI の会話は読み取り専用です。Web は ~/.grok/web-chat、CLI は ~/.grok/sessions にあり、続行はターミナルで行ってください。",
     thinking: "考え中",
     "view.process": "過程を見る",
     "view.team": "チームを見る",
@@ -667,6 +679,7 @@ const state = {
     budget_tokens: 0,
   },
   settingsTab: "account",
+  sourceFilter: "all",
   leftW: Number(localStorage.getItem("grok-left-w")) || 280,
   rightW: Number(localStorage.getItem("grok-right-w")) || 340,
   graphH: Number(localStorage.getItem("grok-graph-h")) || 220,
@@ -699,6 +712,10 @@ const els = {
   slash: $("slash"),
   modeChip: $("modeChip"),
   themePanel: $("themePanel"),
+  langPicker: $("langPicker"),
+  langBtn: $("langBtn"),
+  langLabel: $("langLabel"),
+  langMenu: $("langMenu"),
   authStatus: $("authStatus"),
   apiKey: $("apiKey"),
   sidebar: $("sidebar"),
@@ -867,7 +884,36 @@ function setLang(id, persist = true) {
 }
 
 function cycleLang() {
-  setLang(state.lang === "zh" ? "en" : "zh");
+  const i = LANGS.findIndex((l) => l.id === state.lang);
+  setLang(LANGS[(i + 1) % LANGS.length].id);
+}
+
+function renderLangMenu() {
+  const meta = LANGS.find((l) => l.id === state.lang) || LANGS[0];
+  if (els.langLabel) els.langLabel.textContent = meta.short;
+  if (els.langBtn) els.langBtn.title = t("lang.label");
+  if (!els.langMenu) return;
+  els.langMenu.innerHTML = LANGS.map(
+    (item) => `<button type="button" class="model-option ${item.id === state.lang ? "active" : ""}" data-lang-set="${item.id}" role="option">
+      <span class="name">${escapeHtml(item.name)}</span>
+      <span class="check">${item.id === state.lang ? "✓" : ""}</span>
+    </button>`
+  ).join("");
+}
+
+function openLangMenu() {
+  renderLangMenu();
+  if (!els.langMenu || !els.langPicker) return;
+  els.langMenu.hidden = false;
+  els.langPicker.classList.add("open");
+  els.langBtn?.setAttribute("aria-expanded", "true");
+}
+
+function closeLangMenu() {
+  if (!els.langMenu) return;
+  els.langMenu.hidden = true;
+  els.langPicker?.classList.remove("open");
+  els.langBtn?.setAttribute("aria-expanded", "false");
 }
 
 function applyI18n() {
@@ -885,11 +931,7 @@ function applyI18n() {
   document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
     el.setAttribute("aria-label", t(el.dataset.i18nAria));
   });
-  const langMeta = LANGS.find((l) => l.id === state.lang) || LANGS[0];
-  if ($("langBtn")) {
-    $("langBtn").textContent = langMeta.short;
-    $("langBtn").title = state.lang === "zh" ? "Switch to English" : "切换到中文";
-  }
+  renderLangMenu();
   document.querySelectorAll("[data-lang-set]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.langSet === state.lang);
   });
@@ -997,12 +1039,21 @@ async function truncateBefore(id) {
   renderRecents();
 }
 
+function isCliChat(item = state.current) {
+  return Boolean(item && (item.source === "cli" || item.readonly || String(item.id || "").startsWith("cli:")));
+}
+
+function setCliReadonly(on) {
+  $("main")?.classList.toggle("cli-readonly", Boolean(on));
+}
+
 async function editUserMessage(id) {
+  if (isCliChat()) return toast(t("origin.readonly"));
   const msgs = state.current?.messages || [];
   const idx = msgs.findIndex((m) => m.id === id);
   if (idx < 0) return;
   const msg = msgs[idx];
-  if (msg.source === "cli") return toast("CLI 原话只能复制");
+  if (msg.source === "cli") return toast(t("origin.readonly"));
   await truncateBefore(id);
   els.input.value = msg.content || "";
   resizeInput();
@@ -1011,11 +1062,12 @@ async function editUserMessage(id) {
 }
 
 async function regenerateMessage(id) {
+  if (isCliChat()) return toast(t("origin.readonly"));
   const msgs = state.current?.messages || [];
   const idx = msgs.findIndex((m) => m.id === id);
   if (idx < 0) return;
   const user = [...msgs.slice(0, idx)].reverse().find((m) => m.role === "user");
-  if (!user || user.source === "cli") return toast("这条不能重新生成");
+  if (!user || user.source === "cli") return toast(t("origin.readonly"));
   await truncateBefore(user.id);
   els.input.value = user.content || "";
   resizeInput();
@@ -2135,11 +2187,21 @@ function dateGroup(iso) {
   return t("date.older");
 }
 
+function setSourceFilter(src) {
+  state.sourceFilter = src || "all";
+  document.querySelectorAll("[data-src]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.src === state.sourceFilter);
+  });
+  renderRecents();
+}
+
 function renderRecents() {
   const q = els.search.value.trim().toLowerCase();
-  const items = state.conversations.filter(
-    (c) => !q || (c.title || "").toLowerCase().includes(q) || (c.preview || "").toLowerCase().includes(q)
-  );
+  const items = state.conversations.filter((c) => {
+    if (state.sourceFilter === "cli" && c.source !== "cli") return false;
+    if (state.sourceFilter === "web" && c.source === "cli") return false;
+    return !q || (c.title || "").toLowerCase().includes(q) || (c.preview || "").toLowerCase().includes(q);
+  });
   if (!items.length) {
     els.recents.innerHTML = `<div class="empty-recents">${q ? t("empty.miss") : t("empty.none")}</div>`;
     return;
@@ -2160,9 +2222,9 @@ function renderRecents() {
       <div class="conv ${state.current?.id === c.id ? "active" : ""}" data-id="${c.id}">
         <span class="conv-title">${escapeHtml(c.title || "新对话")}</span>
         ${c.source === "cli" ? `<span class="badge">CLI</span>` : ""}
-        <button class="conv-menu" data-menu="${c.id}" type="button" aria-label="更多">
+        ${c.source === "cli" ? "" : `<button class="conv-menu" data-menu="${c.id}" type="button" aria-label="更多">
           <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="6" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18" cy="12" r="1.4"/></svg>
-        </button>
+        </button>`}
       </div>`
           )
           .join("")
@@ -2217,7 +2279,9 @@ function setWelcome(empty) {
 
 function renderMessages() {
   const messages = state.current?.messages || [];
-  if (!messages.length) {
+  const cli = isCliChat();
+  setCliReadonly(cli);
+  if (!messages.length && !cli) {
     els.hero.hidden = false;
     els.messages.hidden = true;
     els.messages.innerHTML = "";
@@ -2227,10 +2291,9 @@ function renderMessages() {
   setWelcome(false);
   els.hero.hidden = true;
   els.messages.hidden = false;
-  const origin =
-    state.current?.source === "cli"
-      ? `<div class="origin">${t("origin.cli")}${state.current.cwd ? ` · ${escapeHtml(state.current.cwd)}` : ""}${t("origin.cont")}</div>`
-      : "";
+  const origin = cli
+    ? `<div class="origin">${t("origin.cli")}${state.current?.cwd ? ` · ${escapeHtml(state.current.cwd)}` : ""}${t("origin.cont")}</div>`
+    : "";
   els.messages.innerHTML =
     origin +
     messages
@@ -2242,7 +2305,7 @@ function renderMessages() {
             ${m.content ? `<div class="bubble">${escapeHtml(m.content)}</div>` : ""}
             <div class="msg-actions right">
               <button type="button" data-msg="copy" data-id="${m.id}">${t("copy")}</button>
-              ${m.source === "cli" ? "" : `<button type="button" data-msg="edit" data-id="${m.id}">${t("edit")}</button>`}
+              ${cli || m.source === "cli" ? "" : `<button type="button" data-msg="edit" data-id="${m.id}">${t("edit")}</button>`}
             </div>
           </div>
         </div>`;
@@ -2266,7 +2329,7 @@ function renderMessages() {
         ${m.error ? `<div class="error-banner">${escapeHtml(m.error)}</div>` : ""}
         ${m.content || m.error ? `<div class="msg-actions">
           <button type="button" data-msg="copy" data-id="${m.id}">${t("copy")}</button>
-          ${m.source === "cli" || pending ? "" : `<button type="button" data-msg="regen" data-id="${m.id}">${t("regen")}</button>`}
+          ${cli || m.source === "cli" || pending ? "" : `<button type="button" data-msg="regen" data-id="${m.id}">${t("regen")}</button>`}
         </div>` : ""}
       </div>`;
       })
@@ -2325,6 +2388,7 @@ async function openConversation(id) {
   renderRecents();
   closeSidebar();
   els.thread.scrollTop = els.thread.scrollHeight;
+  if (!isCliChat(item)) els.input.focus();
 }
 
 async function newChat() {
@@ -2397,6 +2461,7 @@ async function send() {
     }
   }
   if (!text && !state.pendingFiles.length) return;
+  if (isCliChat()) return toast(t("origin.readonly"));
 
   const files = [...state.pendingFiles];
   els.input.value = "";
@@ -2692,6 +2757,7 @@ async function runSlash(item, arg = "") {
   }
   if (id === "rename") {
     if (!state.current?.id) return toast("先打开一段对话");
+    if (isCliChat()) return toast(t("origin.readonly"));
     state.renameId = state.current.id;
     els.renameInput.value = state.current.title || "";
     els.renameDialog.showModal();
@@ -3058,14 +3124,12 @@ function closeMenu() {
 }
 
 function openMenu(btn, id) {
+  if (String(id).startsWith("cli:")) return;
   closeMenu();
   btn.classList.add("open");
   const menu = document.createElement("div");
   menu.className = "menu";
-  const isCli = String(id).startsWith("cli:");
-  menu.innerHTML = isCli
-    ? `<button type="button" data-act="rename">${t("rename.title")}</button>`
-    : `<button type="button" data-act="rename">${t("rename.title")}</button>
+  menu.innerHTML = `<button type="button" data-act="rename">${t("rename.title")}</button>
     <button type="button" data-act="delete" class="danger">${slashName(findSlash("delete") || { id: "delete", name: "删除" })}</button>`;
   document.body.appendChild(menu);
   const rect = btn.getBoundingClientRect();
@@ -3112,7 +3176,20 @@ function bindEvents() {
   });
   $("langBtn")?.addEventListener("click", (e) => {
     e.stopPropagation();
-    cycleLang();
+    closeModelMenu();
+    closeEffortMenu();
+    if (els.langMenu && els.langMenu.hidden) openLangMenu();
+    else closeLangMenu();
+  });
+  els.langMenu?.addEventListener("click", (e) => {
+    const id = e.target.closest("[data-lang-set]")?.dataset.langSet;
+    if (!id) return;
+    setLang(id);
+    closeLangMenu();
+  });
+  $("srcFilter")?.addEventListener("click", (e) => {
+    const src = e.target.closest("[data-src]")?.dataset.src;
+    if (src) setSourceFilter(src);
   });
   $("closeTheme")?.addEventListener("click", closeThemePanel);
   $("attachBtn").addEventListener("click", () => els.fileInput.click());
@@ -3141,11 +3218,13 @@ function bindEvents() {
     if (!e.target.closest(".menu") && !e.target.closest(".conv-menu")) closeMenu();
     if (!e.target.closest("#modelPicker")) closeModelMenu();
     if (!e.target.closest("#effortPicker")) closeEffortMenu();
+    if (!e.target.closest("#langPicker")) closeLangMenu();
     if (!e.target.closest(".set-picker")) closeSetMenus();
   });
   els.modelBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     closeEffortMenu();
+    closeLangMenu();
     if (els.modelMenu.hidden) openModelMenu();
     else closeModelMenu();
   });
@@ -3156,6 +3235,7 @@ function bindEvents() {
   els.effortBtn?.addEventListener("click", (e) => {
     e.stopPropagation();
     closeModelMenu();
+    closeLangMenu();
     if (els.effortMenu.hidden) openEffortMenu();
     else closeEffortMenu();
   });
@@ -3366,6 +3446,11 @@ function bindEvents() {
   });
   $("renameConfirm").addEventListener("click", async (e) => {
     e.preventDefault();
+    if (state.renameId && String(state.renameId).startsWith("cli:")) {
+      toast(t("origin.readonly"));
+      els.renameDialog.close();
+      return;
+    }
     if (state.renameId) {
       await api(`/api/conversations/${state.renameId}`, {
         method: "PATCH",

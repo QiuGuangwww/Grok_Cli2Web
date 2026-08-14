@@ -18,6 +18,9 @@ from typing import Any
 import logging
 
 import httpx
+
+# Windows registry often maps .svg -> image/svg. Browsers only render image/svg+xml.
+mimetypes.add_type("image/svg+xml", ".svg")
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -27,7 +30,6 @@ ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 DATA_DIR = Path.home() / ".grok" / "web-chat"
 UPLOADS = DATA_DIR / "uploads"
-CONTINUATIONS = DATA_DIR / "cli_continuations"
 CONV_PATH = DATA_DIR / "conversations.json"
 SETTINGS_PATH = DATA_DIR / "settings.json"
 AUTH_PATH = Path.home() / ".grok" / "auth.json"
@@ -41,7 +43,6 @@ log = logging.getLogger("grok-chat")
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 UPLOADS.mkdir(parents=True, exist_ok=True)
-CONTINUATIONS.mkdir(parents=True, exist_ok=True)
 
 MODE_PROMPTS = {
     "chat": (
@@ -573,7 +574,88 @@ def find_cli_dir(sid: str) -> Path:
     raise HTTPException(404, "对话不存在")
 
 
-def parse_cli_messages(session_dir: Path) -> list[dict[str, Any]]:
+USER_QUERY_RE = re.compile(r"<user_query>\s*(.*?)\s*</user_query>", re.DOTALL)
+SKIP_USER_PREFIXES = ("<system-reminder>", "<user_info>", "<rules>", "<skill")
+
+
+def visible_user_text(raw: str) -> str | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    found = USER_QUERY_RE.search(text)
+    if found:
+        return found.group(1).strip() or None
+    if text.startswith(SKIP_USER_PREFIXES):
+        return None
+    return text
+
+
+def _cli_blocks_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict) and block.get("type") == "text":
+            parts.append(str(block.get("text") or ""))
+    return "\n".join(parts)
+
+
+def parse_cli_chat_history(session_dir: Path) -> list[dict[str, Any]]:
+    path = session_dir / "chat_history.jsonl"
+    if not path.exists():
+        return []
+    messages: list[dict[str, Any]] = []
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                kind = obj.get("type")
+                if kind == "user":
+                    if obj.get("synthetic_reason"):
+                        continue
+                    text = visible_user_text(_cli_blocks_to_text(obj.get("content")))
+                    if not text:
+                        continue
+                    messages.append(
+                        {
+                            "id": f"cli-user-{len(messages)}",
+                            "role": "user",
+                            "content": text,
+                            "files": [],
+                            "source": "cli",
+                            "created_at": obj.get("timestamp"),
+                        }
+                    )
+                elif kind == "assistant":
+                    text = str(obj.get("content") or "").strip()
+                    if not text:
+                        continue
+                    messages.append(
+                        {
+                            "id": f"cli-asst-{len(messages)}",
+                            "role": "assistant",
+                            "content": text,
+                            "files": [],
+                            "source": "cli",
+                            "created_at": obj.get("timestamp"),
+                        }
+                    )
+    except OSError:
+        return messages
+    return messages
+
+
+def parse_cli_updates(session_dir: Path) -> list[dict[str, Any]]:
     path = session_dir / "updates.jsonl"
     if not path.exists():
         return []
@@ -587,12 +669,9 @@ def parse_cli_messages(session_dir: Path) -> list[dict[str, Any]]:
             tools = []
             return
         text = str(current.get("content") or "").strip()
-        if current.get("role") == "user" and (
-            text.startswith("<system-reminder>") or text.startswith("<user_info>")
-        ):
-            current = None
-            tools = []
-            return
+        if current.get("role") == "user":
+            text = visible_user_text(text) or ""
+            current["content"] = text
         if tools:
             current["tools"] = tools[:12]
         if text or current.get("tools"):
@@ -656,6 +735,13 @@ def parse_cli_messages(session_dir: Path) -> list[dict[str, Any]]:
     return messages
 
 
+def parse_cli_messages(session_dir: Path) -> list[dict[str, Any]]:
+    history = parse_cli_chat_history(session_dir)
+    if history:
+        return history
+    return parse_cli_updates(session_dir)
+
+
 def list_cli_summaries() -> list[dict[str, Any]]:
     if not SESSIONS_DIR.exists():
         return []
@@ -667,18 +753,18 @@ def list_cli_summaries() -> list[dict[str, Any]]:
         info = data.get("info") or {}
         sid = info.get("id") or summary.parent.name
         title = data.get("generated_title") or data.get("session_summary") or "CLI 对话"
-        cont = read_json(CONTINUATIONS / f"{sid}.json", {})
         items.append(
             {
                 "id": f"cli:{sid}",
-                "title": cont.get("title") or title,
+                "title": title,
                 "created_at": data.get("created_at"),
-                "updated_at": cont.get("updated_at") or data.get("updated_at") or data.get("last_active_at"),
-                "model": cont.get("model") or data.get("current_model_id") or "grok-4.6",
+                "updated_at": data.get("updated_at") or data.get("last_active_at"),
+                "model": data.get("current_model_id") or "grok-4.6",
                 "preview": (data.get("last_turn_summary") or title or "")[:80],
                 "message_count": data.get("num_chat_messages") or data.get("num_messages") or 0,
                 "source": "cli",
                 "cwd": info.get("cwd"),
+                "readonly": True,
             }
         )
     return items
@@ -698,20 +784,19 @@ def get_conversation(cid: str) -> dict[str, Any]:
         folder = find_cli_dir(sid)
         summary = read_json(folder / "summary.json", {})
         info = summary.get("info") or {}
-        cont = read_json(CONTINUATIONS / f"{sid}.json", {})
         cli_messages = parse_cli_messages(folder)
-        extra = cont.get("messages") or []
-        title = cont.get("title") or summary.get("generated_title") or summary.get("session_summary") or "CLI 对话"
+        title = summary.get("generated_title") or summary.get("session_summary") or "CLI 对话"
         return {
             "id": cid,
             "title": title,
             "created_at": summary.get("created_at"),
-            "updated_at": cont.get("updated_at") or summary.get("updated_at") or summary.get("last_active_at"),
-            "model": cont.get("model") or summary.get("current_model_id") or "grok-4.6",
-            "previous_response_id": cont.get("previous_response_id"),
-            "messages": cli_messages + extra,
+            "updated_at": summary.get("updated_at") or summary.get("last_active_at"),
+            "model": summary.get("current_model_id") or "grok-4.6",
+            "previous_response_id": None,
+            "messages": cli_messages,
             "source": "cli",
             "cwd": info.get("cwd"),
+            "readonly": True,
         }
     item = get_web_conversation(cid)
     if not item:
@@ -719,22 +804,13 @@ def get_conversation(cid: str) -> dict[str, Any]:
     return item
 
 
+def reject_cli_write(cid: str | None) -> None:
+    if is_cli_id(cid):
+        raise HTTPException(400, "CLI 对话只读。网页在 ~/.grok/web-chat，CLI 在 ~/.grok/sessions，请在 Grok CLI 里继续。")
+
+
 def upsert_conversation(updated: dict[str, Any]) -> dict[str, Any]:
-    if is_cli_id(updated.get("id")):
-        sid = cli_sid(updated["id"])
-        extra = [m for m in (updated.get("messages") or []) if m.get("source") != "cli"]
-        write_json(
-            CONTINUATIONS / f"{sid}.json",
-            {
-                "id": updated["id"],
-                "title": updated.get("title"),
-                "previous_response_id": updated.get("previous_response_id"),
-                "model": updated.get("model"),
-                "messages": extra,
-                "updated_at": updated.get("updated_at") or now_iso(),
-            },
-        )
-        return updated
+    reject_cli_write(updated.get("id"))
     items = load_conversations()
     found = False
     for i, item in enumerate(items):
@@ -1071,6 +1147,7 @@ async def read_conversation(cid: str) -> dict[str, Any]:
 
 @app.patch("/api/conversations/{cid}")
 async def patch_conversation(cid: str, body: ConversationPatch) -> dict[str, Any]:
+    reject_cli_write(cid)
     item = get_conversation(cid)
     if body.title is not None:
         title = body.title.strip() or "新对话"
@@ -1092,11 +1169,7 @@ async def patch_conversation(cid: str, body: ConversationPatch) -> dict[str, Any
 
 @app.delete("/api/conversations/{cid}")
 async def delete_conversation(cid: str) -> dict[str, Any]:
-    if is_cli_id(cid):
-        path = CONTINUATIONS / f"{cli_sid(cid)}.json"
-        if path.exists():
-            path.unlink()
-        return {"ok": True, "kept_cli": True}
+    reject_cli_write(cid)
     items = [x for x in load_conversations() if x["id"] != cid]
     save_conversations(items)
     return {"ok": True}
@@ -3674,6 +3747,7 @@ async def chat(body: ChatIn) -> StreamingResponse:
     if effort not in {"low", "medium", "high", "xhigh"}:
         effort = "high"
     if body.conversation_id:
+        reject_cli_write(body.conversation_id)
         convo = get_conversation(body.conversation_id)
     else:
         convo = {
