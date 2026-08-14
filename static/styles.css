@@ -186,6 +186,7 @@ html,
 body {
   height: 100%;
   margin: 0;
+  overflow: hidden;
 }
 
 body {
@@ -214,7 +215,8 @@ button {
 .app {
   display: flex;
   height: 100%;
-  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
   --sidebar: 280px;
   --inspect: 340px;
 }
@@ -369,6 +371,7 @@ button {
   flex: 0 0 var(--inspect);
   width: var(--inspect);
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg-sidebar);
@@ -907,6 +910,7 @@ button {
 .main {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg);
@@ -1848,8 +1852,11 @@ html[data-scheme="dark"] .send.busy {
 
 .settings-scroll {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 8px 20px 20px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
 .settings-pane {
@@ -2035,11 +2042,30 @@ input[type="range"]::-moz-range-progress {
 }
 
 .theme-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   padding: 4px 16px 24px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.theme-body::-webkit-scrollbar,
+.settings-scroll::-webkit-scrollbar,
+.thread::-webkit-scrollbar {
+  width: 8px;
+}
+
+.theme-body::-webkit-scrollbar-thumb,
+.settings-scroll::-webkit-scrollbar-thumb,
+.thread::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 99px;
 }
 
 .theme-grid {
   display: grid;
+  grid-template-columns: 1fr;
   gap: 12px;
   margin-top: 14px;
 }
