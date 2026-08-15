@@ -20,7 +20,7 @@
       id="hl-dark"
       disabled
     />
-    <link rel="stylesheet" href="/assets/styles.css?v=55" />
+    <link rel="stylesheet" href="/assets/styles.css?v=58" />
     <style>
       .drop-overlay,
       #dropOverlay {
@@ -152,6 +152,14 @@
                   placeholder="问任何问题，或输入 / 选择模式"
                   enterkeyhint="send"
                 ></textarea>
+              </div>
+              <div class="perm-picker" id="permPicker">
+                <button class="perm-btn" id="permBtn" type="button" aria-haspopup="listbox">
+                  <span class="perm-btn-icon" id="permBtnIcon"></span>
+                  <span id="permLabel" data-i18n="perm.ask">需要批准</span>
+                  <svg class="perm-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 9.5 12 14.5 17 9.5" /></svg>
+                </button>
+                <div class="perm-menu" id="permMenu" hidden></div>
               </div>
               <button class="send" id="sendBtn" type="button" disabled data-i18n-aria="send">
                 <svg class="send-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -382,6 +390,6 @@
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.5/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/common.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js"></script>
-    <script src="/assets/app.js?v=59"></script>
+    <script src="/assets/app.js?v=61"></script>
   </body>
 </html>

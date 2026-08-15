@@ -9,6 +9,7 @@ import json
 import mimetypes
 import os
 import re
+import subprocess
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -47,31 +48,37 @@ UPLOADS.mkdir(parents=True, exist_ok=True)
 MODE_PROMPTS = {
     "chat": (
         "You are Grok, a helpful, sharp, and warm assistant from xAI. "
-        "Reply in the user's language. Use clean Markdown. Be concise unless the user wants depth."
+        "Reply in the user's language. Use clean Markdown. Be concise unless the user wants depth. "
+        "If the user names a local path or project, inspect it with list_dir/read_file/grep before answering."
     ),
     "research": (
         "You are Grok in deep-research mode. Search the web, cross-check sources, "
         "and write a structured report with headings, key findings, uncertainties, and links. "
+        "If the user also names local notes, papers, or a repo, read those files and fold them in. "
         "Reply in the user's language. Prefer evidence over speculation."
     ),
     "web": (
         "You are Grok. Use web search for current facts, news, prices, and anything that may have changed. "
-        "Cite sources briefly. Reply in the user's language."
+        "If the user names a local file or project, read it too. Cite sources briefly. Reply in the user's language."
     ),
     "think": (
         "You are Grok in careful-reasoning mode. Slow down, examine assumptions, "
-        "consider alternatives, and give a precise answer. Reply in the user's language."
+        "consider alternatives, and give a precise answer. "
+        "If the question is about local code or files, read them first. Reply in the user's language."
     ),
     "code": (
         "You are Grok as a senior software engineer. Prefer working code, exact file paths, "
-        "and concise explanations. Reply in the user's language unless the user is writing code."
+        "and concise explanations. For a local project, list_dir/read_file/grep before you propose edits. "
+        "Reply in the user's language unless the user is writing code."
     ),
     "write": (
         "You are Grok as an editor and writer. Improve clarity, rhythm, and tone. "
+        "If the user points at a local draft or notes, read that file first. "
         "Offer a polished draft first, then brief notes. Reply in the user's language."
     ),
     "multi": (
         "You are the lead agent of a small local team. "
+        "If the user names a local project, inspect it before splitting work. "
         "Give a clear final answer in the user's language after your specialists report in."
     ),
 }
@@ -85,7 +92,8 @@ ASK_RULE = (
 )
 
 TOOL_RULE = (
-    "You have real server-side tools (web_search, x_search, code_interpreter). "
+    "You have real tools: web_search, x_search, code_interpreter, "
+    "and local read_file / list_dir / grep (write_file and run_command only if the user granted full access). "
     "Call those tools instead of writing tool invocations as text. "
     "Never narrate that you are about to call a tool, and never write I'll call / I'll execute / I'll go. "
     "If you need a tool, call it. Otherwise write the result. "
@@ -147,6 +155,126 @@ DEFAULT_TOOLS = [
     {"type": "x_search"},
     {"type": "code_interpreter"},
 ]
+
+READ_TOOL_NAMES = {"read_file", "list_dir", "grep"}
+WRITE_TOOL_NAMES = {"write_file", "run_command"}
+LOCAL_TOOL_NAMES = READ_TOOL_NAMES | WRITE_TOOL_NAMES
+PERM_MODES = {"ask", "auto", "all"}
+HOME = Path.home()
+DENIED_PATH_PARTS = {".ssh", ".gnupg", ".aws", ".azure", "id_rsa", "id_ed25519"}
+DENIED_NAMES = {"auth.json", ".netrc", "credentials", "id_rsa", "id_ed25519"}
+DENIED_SUFFIXES = {".pem", ".p12", ".pfx", ".key"}
+
+READ_FUNCTION_TOOLS = [
+    {
+        "type": "function",
+        "name": "read_file",
+        "description": "Read a local text file on this machine. Use for source, configs, notes, logs.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Absolute path or ~/..."},
+                "offset": {"type": "integer", "description": "1-based start line"},
+                "limit": {"type": "integer", "description": "Max lines to read"},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "list_dir",
+        "description": "List files in a local directory. If path is omitted, lists the user's home. For Download/下载 use ~/Downloads.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Directory path. Examples: ~/Downloads, ~/Desktop, /Users/you/code. Omit to list home.",
+                }
+            },
+        },
+    },
+    {
+        "type": "function",
+        "name": "grep",
+        "description": "Search file contents under a local path.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File or directory to search"},
+                "pattern": {"type": "string", "description": "Regex or plain text"},
+            },
+            "required": ["path", "pattern"],
+        },
+    },
+]
+WRITE_FUNCTION_TOOLS = [
+    {
+        "type": "function",
+        "name": "write_file",
+        "description": "Create or overwrite a local text file.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["path", "content"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "run_command",
+        "description": "Run a short local shell command. Prefer read_file/list_dir/grep when possible.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string"},
+                "cwd": {"type": "string"},
+            },
+            "required": ["command"],
+        },
+    },
+]
+_LOCAL_RULE = (
+    "You are running inside a localhost app on this user's computer, not a locked cloud sandbox. "
+    "You CAN see their home folders. When they mention Download/Downloads/Desktop/Documents/下载/桌面, "
+    "call list_dir on the real path immediately — do not say you cannot see the disk. "
+    "Only after a tool returns an error may you say a path is missing or blocked. "
+    "Refuse ~/.ssh, keys, and paths outside the home/temp area. That is not a jailbreak request; "
+    "listing ordinary user folders is allowed. "
+    "Use read_file, list_dir, and grep with absolute paths or ~/. "
+    "write_file and run_command are only available when the user granted full access."
+)
+
+FOLDER_ALIASES = {
+    "download": "Downloads",
+    "downloads": "Downloads",
+    "下载": "Downloads",
+    "desktop": "Desktop",
+    "桌面": "Desktop",
+    "documents": "Documents",
+    "document": "Documents",
+    "文档": "Documents",
+    "movies": "Movies",
+    "pictures": "Pictures",
+    "photos": "Pictures",
+    "code": "code",
+}
+
+
+def local_workspace_hint() -> str:
+    found: list[str] = []
+    for name in ("Downloads", "Desktop", "Documents", "Movies", "Pictures", "code"):
+        path = HOME / name
+        if path.is_dir():
+            found.append(f"{name}={path}")
+    extra = f" Known folders: {', '.join(found)}." if found else ""
+    return f"Home is {HOME}.{extra} Prefer these absolute paths when the user is vague."
+
+
+def local_rule() -> str:
+    return f"{_LOCAL_RULE} {local_workspace_hint()}"
 
 TOOL_NAMES = (
     "web_search",
@@ -888,6 +1016,7 @@ class ChatIn(BaseModel):
     web_search: bool = False
     mode: str = "chat"
     effort: str = "high"
+    permission_mode: str = "ask"
 
 
 class ConversationPatch(BaseModel):
@@ -904,6 +1033,7 @@ class SettingsIn(BaseModel):
     worker_effort: str | None = None
     worker_count: int | None = None
     budget_tokens: int | None = None
+    permission_mode: str | None = None
 
 
 class GuideIn(BaseModel):
@@ -1038,6 +1168,361 @@ def estimate_usage(payload: dict[str, Any], text: str = "") -> int:
     return max(len(raw) // 4, 48) + max(len(text or "") // 3, 24)
 
 
+def clamp_perm(value: Any, fallback: str = "ask") -> str:
+    key = str(value or "").strip().lower()
+    return key if key in PERM_MODES else fallback
+
+
+def local_tools_for(mode: str) -> list[dict[str, Any]]:
+    tools = list(DEFAULT_TOOLS) + list(READ_FUNCTION_TOOLS)
+    if clamp_perm(mode) == "all":
+        tools.extend(WRITE_FUNCTION_TOOLS)
+    return tools
+
+
+def permission_decision(mode: str, name: str) -> str:
+    mode = clamp_perm(mode)
+    if name not in LOCAL_TOOL_NAMES:
+        return "deny"
+    if name in WRITE_TOOL_NAMES and mode != "all":
+        return "deny"
+    if mode == "all":
+        return "allow"
+    if mode == "auto" and name in READ_TOOL_NAMES:
+        return "allow"
+    return "ask"
+
+
+def _is_denied_path(path: Path) -> bool:
+    parts = {p.lower() for p in path.parts}
+    if parts & {x.lower() for x in DENIED_PATH_PARTS}:
+        return True
+    name = path.name.lower()
+    if name in DENIED_NAMES or any(name.endswith(suf) for suf in DENIED_SUFFIXES):
+        return True
+    if name == "auth.json" and ".grok" in parts:
+        return True
+    return False
+
+
+def resolve_local_path(raw: str) -> Path:
+    text = str(raw or "").strip()
+    if not text:
+        raise ValueError("缺少路径")
+    alias_key = re.sub(r"^(~\/|\./|/)?", "", text, flags=re.I)
+    alias_key = re.sub(r"(文件夹|目錄|目录|folder|dir)s?$", "", alias_key, flags=re.I).strip(" /\\").lower()
+    if alias_key in FOLDER_ALIASES:
+        path = HOME / FOLDER_ALIASES[alias_key]
+    else:
+        path = Path(text).expanduser()
+        if not path.is_absolute():
+            path = HOME / path
+    try:
+        path = path.resolve()
+    except OSError as exc:
+        raise ValueError(f"无法解析路径：{exc}") from exc
+    allowed = (HOME, Path("/tmp"), Path("/var/tmp"), DATA_DIR)
+    if os.name == "nt":
+        allowed = (HOME, DATA_DIR, Path(os.environ.get("TEMP") or HOME))
+    if not any(path == root or root in path.parents for root in allowed):
+        raise ValueError("只能访问主目录和临时目录")
+    if _is_denied_path(path):
+        raise ValueError("这个路径被保护，不能访问")
+    return path
+
+
+def extract_function_calls(blob: Any) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    if not isinstance(blob, dict):
+        return []
+    if isinstance(blob.get("item"), dict):
+        items.append(blob["item"])
+    if str(blob.get("type") or "") in {"function_call", "tool_call"} or blob.get("name"):
+        items.append(blob)
+    resp = blob.get("response") if isinstance(blob.get("response"), dict) else blob
+    for item in resp.get("output") or []:
+        if isinstance(item, dict):
+            items.append(item)
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in items:
+        name = str(item.get("name") or (item.get("function") or {}).get("name") or "").strip()
+        typ = str(item.get("type") or "")
+        if name not in LOCAL_TOOL_NAMES and "function_call" not in typ:
+            continue
+        if not name:
+            continue
+        args = item.get("arguments") or (item.get("function") or {}).get("arguments") or {}
+        if isinstance(args, str):
+            try:
+                args = json.loads(args or "{}")
+            except json.JSONDecodeError:
+                args = {"raw": args}
+        if not isinstance(args, dict):
+            args = {}
+        call_id = str(item.get("call_id") or item.get("id") or "")
+        key = call_id or f"{name}:{json.dumps(args, ensure_ascii=False)[:80]}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"call_id": call_id or key, "name": name, "arguments": args})
+    return out
+
+
+def call_summary(call: dict[str, Any]) -> str:
+    name = str(call.get("name") or "tool")
+    args = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+    target = _arg_path(args) or args.get("command") or args.get("pattern") or ""
+    return f"{name} {target}"[:180]
+
+
+def _arg_path(args: dict[str, Any]) -> str:
+    if not isinstance(args, dict):
+        return ""
+    for key in ("path", "dir", "directory", "folder", "target", "file"):
+        val = args.get(key)
+        if val:
+            return str(val).strip()
+    raw = str(args.get("raw") or "").strip()
+    return raw
+
+
+def execute_local_tool(name: str, args: dict[str, Any]) -> str:
+    try:
+        if name == "read_file":
+            raw_path = _arg_path(args)
+            if not raw_path:
+                return "缺少路径。请传入 path，例如 ~/Downloads/文件.txt"
+            path = resolve_local_path(raw_path)
+            if not path.is_file():
+                return f"不是文件：{path}"
+            raw = path.read_bytes()
+            if b"\x00" in raw[:2048]:
+                return "这是二进制文件，未读取"
+            text = raw.decode("utf-8", errors="replace")
+            lines = text.splitlines()
+            offset = max(int(args.get("offset") or 1), 1)
+            limit = min(max(int(args.get("limit") or 400), 1), 800)
+            chunk = lines[offset - 1 : offset - 1 + limit]
+            numbered = "\n".join(f"{i + offset}|{line}" for i, line in enumerate(chunk))
+            return numbered[:24000] or "(空文件)"
+        if name == "list_dir":
+            raw_path = _arg_path(args) or "~"
+            path = resolve_local_path(raw_path)
+            if not path.is_dir():
+                return f"不是目录：{path}"
+            rows = []
+            for child in sorted(path.iterdir(), key=lambda p: p.name.lower())[:200]:
+                mark = "/" if child.is_dir() else ""
+                rows.append(f"{child.name}{mark}")
+            return "\n".join(rows) or "(空目录)"
+        if name == "grep":
+            raw_path = _arg_path(args) or "~"
+            path = resolve_local_path(raw_path)
+            pattern = str(args.get("pattern") or "")
+            if not pattern:
+                return "缺少 pattern"
+            try:
+                rx = re.compile(pattern)
+            except re.error as exc:
+                return f"无效正则：{exc}"
+            files = [path] if path.is_file() else [p for p in path.rglob("*") if p.is_file()][:400]
+            hits: list[str] = []
+            for file in files:
+                if _is_denied_path(file):
+                    continue
+                try:
+                    data = file.read_bytes()
+                except OSError:
+                    continue
+                if b"\x00" in data[:2048]:
+                    continue
+                for i, line in enumerate(data.decode("utf-8", errors="replace").splitlines(), 1):
+                    if rx.search(line):
+                        hits.append(f"{file}:{i}:{line[:240]}")
+                        if len(hits) >= 80:
+                            return "\n".join(hits)
+            return "\n".join(hits) or "没有匹配"
+        if name == "write_file":
+            path = resolve_local_path(str(args.get("path") or ""))
+            if path.exists() and path.is_dir():
+                return "不能覆盖目录"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            text = str(args.get("content") or "")
+            path.write_text(text, encoding="utf-8")
+            return f"已写入 {path}（{len(text)} 字符）"
+        if name == "run_command":
+            cmd = str(args.get("command") or "").strip()
+            if not cmd:
+                return "缺少 command"
+            if re.search(r"rm\s+-rf\s+/|sudo\s+|mkfs|diskutil\s+erase", cmd):
+                return "拒绝执行危险命令"
+            cwd = HOME
+            if args.get("cwd"):
+                cwd = resolve_local_path(str(args.get("cwd")))
+                if not cwd.is_dir():
+                    return f"cwd 不是目录：{cwd}"
+            proc = subprocess.run(
+                cmd,
+                shell=True,
+                cwd=str(cwd),
+                capture_output=True,
+                text=True,
+                timeout=25,
+            )
+            out = ((proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")).strip()
+            return (out or f"exit {proc.returncode}")[:16000]
+    except ValueError as exc:
+        return str(exc)
+    except subprocess.TimeoutExpired:
+        return "命令超时"
+    except OSError as exc:
+        return f"失败：{exc}"
+    return f"未知工具：{name}"
+
+
+PERM_RUNS: dict[str, dict[str, Any]] = {}
+
+
+def open_perm_run() -> str:
+    run_id = uuid.uuid4().hex[:12]
+    PERM_RUNS[run_id] = {"alive": True}
+    return run_id
+
+
+def close_perm_run(run_id: str) -> None:
+    run = PERM_RUNS.pop(run_id, None)
+    if not run:
+        return
+    fut = run.get("future")
+    if fut and not fut.done():
+        fut.cancel()
+
+
+async def wait_perm_choice(run_id: str, timeout: float = 900.0) -> str | None:
+    run = PERM_RUNS.get(run_id)
+    if not run or not run.get("alive"):
+        return None
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future = loop.create_future()
+    run["future"] = fut
+    try:
+        return await asyncio.wait_for(asyncio.shield(fut), timeout=timeout)
+    except asyncio.TimeoutError:
+        return None
+    finally:
+        if run.get("future") is fut:
+            run.pop("future", None)
+
+
+PERM_OPTIONS = [
+    {"id": "allow", "label": "允许", "desc": "只这一次"},
+    {"id": "deny", "label": "拒绝", "desc": "跳过这个调用"},
+    {"id": "auto", "label": "自动审批", "desc": "本轮只读不再问"},
+    {"id": "all", "label": "全部权限", "desc": "可能改此电脑上的文件并运行命令"},
+]
+
+
+async def apply_perm_choice(perm: dict[str, Any], name: str, choice: str | None) -> str:
+    if choice == "all":
+        perm["mode"] = "all"
+        perm["read_ok"] = True
+        return "allow"
+    if choice == "auto":
+        perm["mode"] = "auto"
+        perm["read_ok"] = True
+        decided = permission_decision("auto", name)
+        return "allow" if decided == "ask" and name in READ_TOOL_NAMES else decided
+    if choice == "deny" or not choice:
+        return "deny"
+    if perm.get("crew"):
+        perm["read_ok"] = True
+    return "allow"
+
+
+async def xai_stream_local(token: str, payload: dict[str, Any], perm: dict[str, Any] | None = None):
+    perm = perm if isinstance(perm, dict) else {"mode": "auto"}
+    perm.setdefault("mode", "auto")
+    if "lock" not in perm:
+        perm["lock"] = asyncio.Lock()
+    mode = clamp_perm(perm.get("mode"), "ask")
+    current = {**payload, "store": True, "tools": local_tools_for(mode)}
+    for _round in range(8):
+        pending: list[dict[str, Any]] = []
+        response_id = None
+        async for ev in xai_stream(token, current):
+            if ev.get("type") == "done":
+                pending = ev.get("calls") or []
+                response_id = ev.get("response_id")
+            yield ev
+        if not pending or not response_id:
+            return
+        outputs: list[dict[str, Any]] = []
+        async with perm["lock"]:
+            mode = clamp_perm(perm.get("mode"), "ask")
+            for call in pending[:6]:
+                name = str(call.get("name") or "")
+                args = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+                decision = permission_decision(mode, name)
+                if decision == "ask" and perm.get("crew") and perm.get("read_ok") and name in READ_TOOL_NAMES:
+                    decision = "allow"
+                if decision == "ask" and perm.get("run_id"):
+                    label = call_summary(call)
+                    question = (
+                        f"多 Agent 要访问本机：{label}。允许这一整轮使用本地文件？"
+                        if perm.get("crew")
+                        else f"允许 {label} ？"
+                    )
+                    yield {"type": "status", "text": f"需要批准：{label}"}
+                    yield {"type": "permission", "run_id": perm["run_id"], "question": question, "options": PERM_OPTIONS}
+                    choice = await wait_perm_choice(str(perm["run_id"]))
+                    decision = await apply_perm_choice(perm, name, choice)
+                    mode = clamp_perm(perm.get("mode"), mode)
+                if decision == "deny":
+                    result = f"未获批准，未执行 {name}"
+                else:
+                    yield {"type": "status", "text": f"正在{name}…"}
+                    result = execute_local_tool(name, args)
+                yield {"type": "activity", "entry": {"kind": "code", "text": f"{call_summary(call)}\n{result[:800]}"}}
+                outputs.append(
+                    {
+                        "type": "function_call_output",
+                        "call_id": call.get("call_id"),
+                        "output": result[:24000],
+                    }
+                )
+        reasoning = current.get("reasoning") if isinstance(current.get("reasoning"), dict) else payload.get("reasoning")
+        current = {
+            "model": current.get("model") or payload.get("model"),
+            "stream": True,
+            "store": True,
+            "tools": local_tools_for(clamp_perm(perm.get("mode"), mode)),
+            "reasoning": reasoning,
+            "previous_response_id": response_id,
+            "input": outputs,
+        }
+
+
+def resolve_perm(run_id: str, text: str) -> bool:
+    run = PERM_RUNS.get(run_id)
+    if not run:
+        return False
+    fut = run.get("future")
+    note = str(text or "").strip()[:80].lower()
+    if not note or not fut or fut.done():
+        return False
+    if "全部" in note or note in {"all", "yolo", "bypass"}:
+        decision = "all"
+    elif "自动" in note or note in {"auto"}:
+        decision = "auto"
+    elif "拒" in note or note in {"deny", "no", "reject"}:
+        decision = "deny"
+    else:
+        decision = "allow"
+    fut.set_result(decision)
+    return True
+
+
 def agent_settings() -> dict[str, Any]:
     raw = load_settings()
     return {
@@ -1047,6 +1532,7 @@ def agent_settings() -> dict[str, Any]:
         "worker_effort": _pick(raw.get("worker_effort"), KNOWN_EFFORTS, "medium"),
         "worker_count": clamp_workers(raw.get("worker_count"), 3),
         "budget_tokens": clamp_budget(raw.get("budget_tokens"), 0),
+        "permission_mode": clamp_perm(raw.get("permission_mode"), "ask"),
     }
 
 
@@ -1090,6 +1576,8 @@ async def update_settings(body: SettingsIn) -> dict[str, Any]:
         patch["worker_count"] = clamp_workers(body.worker_count, 3)
     if body.budget_tokens is not None:
         patch["budget_tokens"] = clamp_budget(body.budget_tokens, 0)
+    if body.permission_mode is not None:
+        patch["permission_mode"] = clamp_perm(body.permission_mode, "ask")
     if patch:
         save_settings(patch)
     return await health()
@@ -1102,6 +1590,16 @@ async def crew_guide(body: GuideIn) -> dict[str, Any]:
         raise HTTPException(400, "请输入指导")
     if not push_guidance(body.run_id, body.agent_id, text):
         raise HTTPException(409, "这一轮已经结束，无法再指导")
+    return {"ok": True}
+
+
+@app.post("/api/perm")
+async def perm_answer(body: AskIn) -> dict[str, Any]:
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(400, "请选择一项")
+    if not resolve_perm(body.run_id, text):
+        raise HTTPException(409, "没有等待中的审批")
     return {"ok": True}
 
 
@@ -1349,6 +1847,7 @@ async def xai_stream(token: str, payload: dict[str, Any], restarts: int = 0):
     stalled = False
     dropped = False
     usage_tokens = 0
+    function_calls: list[dict[str, Any]] = []
     try:
         async with async_client(timeout=httpx.Timeout(3600.0, connect=30.0)) as client:
             async with client.stream(
@@ -1412,6 +1911,9 @@ async def xai_stream(token: str, payload: dict[str, Any], restarts: int = 0):
                             response = event.get("response") or {}
                             response_id = response.get("id") or event.get("id")
                             usage_tokens = parse_usage(event) or parse_usage(response) or usage_tokens
+                            for call in extract_function_calls(event) + extract_function_calls(response):
+                                if call["call_id"] not in {c["call_id"] for c in function_calls}:
+                                    function_calls.append(call)
                             for entry in harvest_activity(event):
                                 activity.append(entry)
                                 yield {"type": "activity", "entry": entry}
@@ -1430,6 +1932,9 @@ async def xai_stream(token: str, payload: dict[str, Any], restarts: int = 0):
                             return
                         else:
                             item = event.get("item") or {}
+                            for call in extract_function_calls(event):
+                                if call["call_id"] not in {c["call_id"] for c in function_calls}:
+                                    function_calls.append(call)
                             note = tool_status(etype, str(item.get("type") or ""))
                             if note:
                                 yield {"type": "status", "text": note}
@@ -1447,7 +1952,7 @@ async def xai_stream(token: str, payload: dict[str, Any], restarts: int = 0):
         log.warning("xai_stream dropped: %s (kept %s chars)", exc, len(kept))
         if looks_complete(kept) and not loop_detected(kept):
             used = usage_tokens or estimate_usage(payload, kept)
-            yield {"type": "done", "text": kept, "response_id": response_id, "activity": compact_activity(activity), "usage": used}
+            yield {"type": "done", "text": kept, "response_id": response_id, "activity": compact_activity(activity), "usage": used, "calls": function_calls}
             return
         dropped = True
     if stalled or dropped:
@@ -1479,6 +1984,7 @@ async def xai_stream(token: str, payload: dict[str, Any], restarts: int = 0):
             "activity": compact_activity(activity),
             "stalled": True,
             "usage": usage_tokens or estimate_usage(payload, kept_text),
+            "calls": function_calls,
         }
         return
     full = visible_answer("".join(collected))
@@ -1488,6 +1994,7 @@ async def xai_stream(token: str, payload: dict[str, Any], restarts: int = 0):
         "response_id": response_id,
         "activity": compact_activity(activity),
         "usage": usage_tokens or estimate_usage(payload, full),
+        "calls": function_calls,
     }
 
 
@@ -2174,11 +2681,13 @@ CREW_RUNS: dict[str, dict[str, Any]] = {}
 def open_crew_run() -> str:
     run_id = uuid.uuid4().hex[:12]
     CREW_RUNS[run_id] = {"notes": {}, "alive": True}
+    PERM_RUNS[run_id] = {"alive": True}
     return run_id
 
 
 def close_crew_run(run_id: str) -> None:
     run = CREW_RUNS.pop(run_id, None)
+    close_perm_run(run_id)
     if not run:
         return
     fut = run.get("ask_future")
@@ -2561,6 +3070,13 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
     machine.budget_tokens = budget_tokens
     machine.max_review = policy["max_review"]
     CREW_RUNS[run_id]["machine"] = machine
+    crew_perm: dict[str, Any] = {
+        "mode": clamp_perm(cfg.get("permission_mode"), "ask"),
+        "run_id": run_id,
+        "crew": True,
+        "lock": asyncio.Lock(),
+        "read_ok": clamp_perm(cfg.get("permission_mode"), "ask") in {"auto", "all"},
+    }
     human_lead_notes: list[str] = []
     running_ids: set[str] = set()
     fact_board: list[dict[str, Any]] = []
@@ -2593,13 +3109,16 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
     plan_payload = {
         "model": lead_model,
         "stream": True,
-        "store": False,
+        "store": True,
+        "tools": local_tools_for(crew_perm.get("mode") or "ask"),
         "reasoning": {"effort": plan_effort},
         "input": [
             {
                 "role": "system",
                 "content": (
-                    f"You are the lead orchestrator. Split the request into 2-4 STEPS. "
+                    f"You are the lead orchestrator. {local_rule()} "
+                    "If the user names a local project, inspect it with list_dir/read_file before splitting work. "
+                    "Split the request into 2-4 STEPS. "
                     "Independent steps run at the same time. A step may have several specialist workers in parallel, "
                     "plus a step lead who aligns their progress. "
                     f"Use at most {worker_count} specialist workers (not counting leads or the reviewer). "
@@ -2620,12 +3139,14 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
         ],
     }
     try:
-        async for ev in xai_stream(token, plan_payload):
+        async for ev in xai_stream_local(token, plan_payload, crew_perm):
             if ev["type"] == "delta":
                 plan_raw += ev.get("text") or ""
             elif ev["type"] == "done":
                 plan_raw = ev.get("text") or plan_raw
                 machine.add_usage(ev.get("usage") or 0)
+            elif ev["type"] in {"permission", "status", "activity"}:
+                yield ev
             elif ev["type"] == "error":
                 log.warning("crew plan failed: %s", ev.get("message"))
                 yield {"type": "status", "text": "规划未完成，改用默认分工继续"}
@@ -2648,12 +3169,14 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
             plan_payload["input"][-1] = {"role": "user", "content": brief}
             plan_raw = ""
             try:
-                async for ev in xai_stream(token, plan_payload):
+                async for ev in xai_stream_local(token, plan_payload, crew_perm):
                     if ev["type"] == "delta":
                         plan_raw += ev.get("text") or ""
                     elif ev["type"] == "done":
                         plan_raw = ev.get("text") or plan_raw
                         machine.add_usage(ev.get("usage") or 0)
+                    elif ev["type"] in {"permission", "status", "activity"}:
+                        yield ev
                     elif ev["type"] == "error":
                         log.warning("crew replan failed: %s", ev.get("message"))
                         plan_raw = ""
@@ -2763,7 +3286,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
         if isinstance(payload.get("reasoning"), dict):
             effort = str(payload["reasoning"].get("effort") or worker_effort)
         try:
-            async for ev in xai_stream(token, payload):
+            async for ev in xai_stream_local(token, payload, crew_perm):
                 if ev["type"] == "reset":
                     full = ""
                     await queue.put({"type": "agent-reset", "agent_id": spec["id"]})
@@ -2776,6 +3299,8 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                 elif ev["type"] == "status":
                     await queue.put({"type": "status", "text": ev.get("text")})
                     await queue.put({"type": "agent-status", "agent_id": spec["id"], "text": ev.get("text")})
+                elif ev["type"] == "permission":
+                    await queue.put(ev)
                 elif ev["type"] == "done":
                     full = ev.get("text") or full
                     activity = ev.get("activity") or activity
@@ -2888,15 +3413,15 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
         return {
             "model": worker_model,
             "stream": True,
-            "store": False,
-            "tools": list(DEFAULT_TOOLS),
+            "store": True,
+            "tools": local_tools_for(crew_perm.get("mode") or "ask"),
             "reasoning": {"effort": worker_effort},
             "input": [
                 {
                     "role": "system",
                     "content": (
                         f"You are sub-agent {spec['name']} in step「{step.get('name') or spec.get('step_name') or ''}」. "
-                        f"{TOOL_RULE} {FEEDBACK_RULE} {GOAL_PIN} "
+                        f"{TOOL_RULE} {local_rule()} {FEEDBACK_RULE} {GOAL_PIN} "
                         f"Plan version v{machine.plan_version}. "
                         "If a changelog is attached, those premises replaced older ones — do not keep working from stale instructions. "
                         f"Your assignment: {brief}. "
@@ -2965,14 +3490,14 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
             payload = {
                 "model": worker_model,
                 "stream": True,
-                "store": False,
-                "tools": list(DEFAULT_TOOLS),
+                "store": True,
+                "tools": local_tools_for(crew_perm.get("mode") or "ask"),
                 "reasoning": {"effort": worker_effort},
                 "input": [
                     {
                         "role": "system",
                         "content": (
-                            f"You are the verify specialist {spec.get('name')}. {TOOL_RULE} {FEEDBACK_RULE} {GOAL_PIN} "
+                            f"You are the verify specialist {spec.get('name')}. {TOOL_RULE} {local_rule()} {FEEDBACK_RULE} {GOAL_PIN} "
                             "Your only job is to settle CONTESTED contract claims. Search or check sources. "
                             "If one side has a better source, emit that fact. "
                             "If both sides stay equally sourced — official channels disagree — emit BOTH claims with sources. "
@@ -3419,14 +3944,14 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
         review_payload = {
             "model": lead_model,
             "stream": True,
-            "store": False,
-            "tools": list(DEFAULT_TOOLS),
+            "store": True,
+            "tools": local_tools_for(crew_perm.get("mode") or "ask"),
             "reasoning": {"effort": plan_effort},
             "input": [
                 {
                     "role": "system",
                     "content": (
-                        f"You are the reviewer. {TOOL_RULE} "
+                        f"You are the reviewer. {TOOL_RULE} {local_rule()} "
                         "You may send work back to the lead. Do not invent missing work or write the final user answer. "
                         "The score below is the stop rule: if coverage>=0.67, conflicts=0, and acceptance>=0.5, prefer pass. "
                         "After a short critique, emit control JSON: "
@@ -3591,10 +4116,10 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
         "model": lead_model,
         "stream": True,
         "store": True,
-        "tools": list(DEFAULT_TOOLS),
+        "tools": local_tools_for(crew_perm.get("mode") or "ask"),
         "reasoning": {"effort": lead_effort},
         "input": [
-            {"role": "system", "content": f"{MODE_PROMPTS['multi']} {TOOL_RULE} {ASK_RULE} {GOAL_PIN}"},
+            {"role": "system", "content": f"{MODE_PROMPTS['multi']} {TOOL_RULE} {local_rule()} {ASK_RULE} {GOAL_PIN}"},
             {
                 "role": "user",
                 "content": (
@@ -3616,7 +4141,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
     lead_activity: list[dict[str, Any]] = []
     lead_text = ""
     response_id = None
-    async for ev in xai_stream(token, synth_payload):
+    async for ev in xai_stream_local(token, synth_payload, crew_perm):
         if ev["type"] == "reset":
             lead_text = ""
             yield ev
@@ -3630,6 +4155,8 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
             yield ev
             yield {"type": "agent-activity", "agent_id": "lead", "entry": ev["entry"]}
         elif ev["type"] == "status":
+            yield ev
+        elif ev["type"] == "permission":
             yield ev
         elif ev["type"] == "done":
             lead_text = ev.get("text") or lead_text
@@ -3663,7 +4190,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
             last = synth_payload["input"][-1]
             last["content"] = f"{last.get('content') or ''}\n\nUser decision:\n{choice}\nWrite the final answer now. Do not ask again."
             lead_text = ""
-            async for ev in xai_stream(token, synth_payload):
+            async for ev in xai_stream_local(token, synth_payload, crew_perm):
                 if ev["type"] == "reset":
                     lead_text = ""
                     yield ev
@@ -3677,6 +4204,8 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                     yield ev
                     yield {"type": "agent-activity", "agent_id": "lead", "entry": ev["entry"]}
                 elif ev["type"] == "status":
+                    yield ev
+                elif ev["type"] == "permission":
                     yield ev
                 elif ev["type"] == "done":
                     lead_text = ev.get("text") or lead_text
@@ -3812,7 +4341,9 @@ async def chat(body: ChatIn) -> StreamingResponse:
             failed = ""
             try:
                 history = compact_history(convo.get("messages") or [], {user_msg["id"], assistant_msg["id"]})
-                async for ev in run_crew(token, text, agent_settings(), history):
+                crew_cfg = agent_settings()
+                crew_cfg["permission_mode"] = clamp_perm(body.permission_mode or crew_cfg.get("permission_mode"), "ask")
+                async for ev in run_crew(token, text, crew_cfg, history):
                     kind = ev.get("type")
                     if kind == "crew-run":
                         crew_run_id = str(ev.get("run_id") or "")
@@ -3946,12 +4477,13 @@ async def chat(body: ChatIn) -> StreamingResponse:
             },
         )
 
-    system_prompt = f"{MODE_PROMPTS[mode]} {TOOL_RULE} {ASK_RULE}"
+    perm_mode = clamp_perm(body.permission_mode or agent_settings().get("permission_mode"), "ask")
+    system_prompt = f"{MODE_PROMPTS[mode]} {TOOL_RULE} {ASK_RULE} {local_rule()}"
     payload: dict[str, Any] = {
         "model": model,
         "stream": True,
         "store": True,
-        "tools": list(DEFAULT_TOOLS),
+        "tools": local_tools_for(perm_mode),
         "reasoning": {"effort": effort},
         "input": [
             {"role": "system", "content": system_prompt},
@@ -3961,7 +4493,7 @@ async def chat(body: ChatIn) -> StreamingResponse:
     if convo.get("previous_response_id"):
         payload["previous_response_id"] = convo["previous_response_id"]
         payload["input"] = [
-            {"role": "system", "content": TOOL_RULE},
+            {"role": "system", "content": f"{TOOL_RULE} {local_rule()}"},
             {"role": "user", "content": user_content},
         ]
     else:
@@ -3984,6 +4516,8 @@ async def chat(body: ChatIn) -> StreamingResponse:
         response_id = None
         activity: list[dict[str, Any]] = []
         full = ""
+        perm_run = open_perm_run()
+        perm_state = {"mode": perm_mode, "run_id": perm_run, "crew": False, "lock": asyncio.Lock()}
         wants_search = bool(
             body.web_search
             or mode in {"research", "web"}
@@ -3992,7 +4526,7 @@ async def chat(body: ChatIn) -> StreamingResponse:
         if wants_search:
             yield sse({"type": "status", "text": "正在搜索…"})
         try:
-            async for ev in xai_stream(token, payload):
+            async for ev in xai_stream_local(token, payload, perm_state):
                 kind = ev.get("type")
                 if kind == "reset":
                     full = ""
@@ -4005,18 +4539,24 @@ async def chat(body: ChatIn) -> StreamingResponse:
                     yield sse(ev)
                 elif kind == "status":
                     yield sse(ev)
+                elif kind == "permission":
+                    yield sse(ev)
                 elif kind == "done":
                     full = ev.get("text") or full
                     response_id = ev.get("response_id") or response_id
                     activity = ev.get("activity") or activity
                 elif kind == "error":
+                    close_perm_run(perm_run)
                     yield sse(ev)
                     return
         except asyncio.CancelledError:
+            close_perm_run(perm_run)
             return
         except Exception as exc:
+            close_perm_run(perm_run)
             yield sse({"type": "error", "message": f"请求失败：{exc}"})
             return
+        close_perm_run(perm_run)
 
         ask = parse_ask(full)
         if ask:

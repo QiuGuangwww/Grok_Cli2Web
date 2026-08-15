@@ -1689,9 +1689,147 @@ html[data-scheme="dark"] .primary-btn {
 
 .composer-row {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) 36px;
+  grid-template-columns: 36px minmax(0, 1fr) auto 36px;
   align-items: end;
   column-gap: 8px;
+}
+
+.perm-picker {
+  position: relative;
+  margin-bottom: 1px;
+  isolation: isolate;
+}
+
+.perm-btn {
+  height: 32px;
+  max-width: 132px;
+  padding: 0 8px 0 8px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.perm-btn #permLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.perm-btn-icon,
+.perm-btn-icon svg,
+.perm-caret {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.perm-btn-icon {
+  display: grid;
+  place-items: center;
+}
+
+.main.welcome .perm-picker.open .perm-caret {
+  transform: rotate(180deg);
+}
+
+.main:not(.welcome) .perm-menu {
+  top: auto;
+  bottom: calc(100% + 12px);
+}
+
+.perm-picker.open .perm-btn,
+.perm-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.perm-picker[data-perm="all"] .perm-btn,
+.perm-picker[data-perm="all"] .perm-btn:hover {
+  color: #c48432;
+}
+
+.perm-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  bottom: auto;
+  width: 268px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 8px 24px rgba(28, 25, 21, 0.12);
+  z-index: 40;
+}
+
+.perm-menu button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  line-height: 1.25;
+  color: var(--text);
+}
+
+.perm-menu button + button {
+  margin-top: 2px;
+}
+
+.perm-item-icon {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.perm-item-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.perm-item-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.perm-item-title {
+  font-size: 13.5px;
+  color: inherit;
+}
+
+.perm-item-desc {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--text-faint);
+  white-space: normal;
+}
+
+.perm-menu button:hover {
+  background: var(--bg-hover);
+}
+
+.perm-menu button.active {
+  background: var(--bg-active);
+}
+
+.perm-menu button[data-perm="all"] .perm-item-icon,
+.perm-menu button[data-perm="all"] .perm-item-title {
+  color: #c48432;
+}
+
+.perm-menu button[data-perm="all"] .perm-item-desc {
+  color: #b08a4a;
 }
 
 .composer .attach,

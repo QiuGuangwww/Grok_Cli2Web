@@ -19,7 +19,7 @@ Listens on `127.0.0.1` only · chats stay on disk in `~/.grok/web-chat/`
 - Streaming replies with Markdown, tables, and KaTeX (`$...$` / `$$...$$`)
 - Modes in the composer (chat, research, web, think, code, write, **multi-agent**)
 - Copy on code blocks and tables; edit or regenerate messages
-- Upload, drag, or paste images and documents
+- Upload, drag, or paste images and documents. Every composer mode (chat, research, web, think, code, write, multi-agent) can read local files like the CLI. The permission menu is 需要批准 / 自动审批 / 全部权限; a crew asks once for the whole run, not per specialist.
 - Load Grok CLI history from `~/.grok/sessions/` as **read-only** (web chats stay in `~/.grok/web-chat/`)
 - `/` command menu: modes, export, usage, workflows, and more
 - Server-side tools: web search, X search, and code interpreter (tool stubs are stripped from the answer)

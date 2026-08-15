@@ -71,6 +71,12 @@ const I18N = {
     "greeting.afternoon": "下午好",
     "greeting.evening": "晚上好",
     attach: "上传文件",
+    "perm.ask": "需要批准",
+    "perm.auto": "自动审批",
+    "perm.all": "全部权限",
+    "perm.askDesc": "读本地文件前先问你",
+    "perm.autoDesc": "只读自动过，写入再问",
+    "perm.allDesc": "可能修改此电脑上的文件并运行命令",
     "input.placeholder": "问任何问题，或输入 / 选择模式",
     send: "发送",
     stop: "停止",
@@ -247,6 +253,12 @@ const I18N = {
     "greeting.afternoon": "Good afternoon",
     "greeting.evening": "Good evening",
     attach: "Upload file",
+    "perm.ask": "Needs approval",
+    "perm.auto": "Auto-approve",
+    "perm.all": "Full access",
+    "perm.askDesc": "Ask before reading local files",
+    "perm.autoDesc": "Reads pass; writes still ask",
+    "perm.allDesc": "May change files and run commands on this computer",
     "input.placeholder": "Ask anything, or type / for modes",
     send: "Send",
     stop: "Stop",
@@ -423,6 +435,12 @@ const I18N = {
     "greeting.afternoon": "こんにちは",
     "greeting.evening": "こんばんは",
     attach: "ファイルをアップロード",
+    "perm.ask": "承認が必要",
+    "perm.auto": "自動承認",
+    "perm.all": "全権限",
+    "perm.askDesc": "ローカル読み取りの前に確認",
+    "perm.autoDesc": "読み取りは自動、書き込みは確認",
+    "perm.allDesc": "このコンピュータのファイル変更やコマンド実行の可能性があります",
     "input.placeholder": "何でも聞くか、/ でモードを選ぶ",
     send: "送信",
     stop: "停止",
@@ -677,6 +695,7 @@ const state = {
     worker_effort: "medium",
     worker_count: 3,
     budget_tokens: 0,
+    permission_mode: localStorage.getItem("grok-perm") || "ask",
   },
   settingsTab: "account",
   sourceFilter: "all",
@@ -1208,6 +1227,7 @@ function fillAgentSelects() {
   if ($("workerCountVal")) $("workerCountVal").textContent = String(count);
   syncWorkerCountWarn(count);
   fillBudgetSlider();
+  fillPermPicker();
   document.querySelectorAll("[data-theme-set]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.themeSet === state.theme);
   });
@@ -1241,6 +1261,45 @@ function budgetIndex(tokens) {
     }
   });
   return best;
+}
+
+function permIcon(mode, size = 16) {
+  if (mode === "all") {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.8 21.2 20H2.8L12 3.8z"/><path d="M12 9.2v5.2" stroke-linecap="round"/><circle cx="12" cy="17.2" r="0.8" fill="currentColor" stroke="none"/></svg>`;
+  }
+  if (mode === "auto") {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h8"/><path d="M9 8h8v8"/><path d="m13 8 4 4-4 4"/></svg>`;
+  }
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 19 7v5.2c0 4.3-2.8 7.4-7 8.8-4.2-1.4-7-4.5-7-8.8V7l7-3.5z"/><path d="m8.8 12.1 2.2 2.2 4.3-4.4"/></svg>`;
+}
+
+function fillPermPicker() {
+  const mode = state.agentSettings.permission_mode || "ask";
+  const picker = $("permPicker");
+  if (picker) picker.dataset.perm = mode;
+  if ($("permLabel")) $("permLabel").textContent = t(`perm.${mode}`);
+  if ($("permBtnIcon")) $("permBtnIcon").innerHTML = permIcon(mode, 14);
+  const menu = $("permMenu");
+  if (menu) {
+    menu.innerHTML = ["ask", "auto", "all"]
+      .map(
+        (id) => `<button type="button" data-perm="${id}" class="${id === mode ? "active" : ""}">
+        <span class="perm-item-icon">${permIcon(id)}</span>
+        <span class="perm-item-copy">
+          <span class="perm-item-title">${escapeHtml(t(`perm.${id}`))}</span>
+          <span class="perm-item-desc">${escapeHtml(t(`perm.${id}Desc`))}</span>
+        </span>
+      </button>`
+      )
+      .join("");
+  }
+}
+
+async function setPermissionMode(mode) {
+  const next = ["ask", "auto", "all"].includes(mode) ? mode : "ask";
+  localStorage.setItem("grok-perm", next);
+  await persistAgentSettings({ permission_mode: next });
+  fillPermPicker();
 }
 
 function fillBudgetSlider() {
@@ -1281,6 +1340,7 @@ async function persistAgentSettings(partial = {}) {
       worker_effort: state.agentSettings.worker_effort,
       worker_count: Number(state.agentSettings.worker_count) || 3,
       budget_tokens: Number(state.agentSettings.budget_tokens) || 0,
+      permission_mode: state.agentSettings.permission_mode || "ask",
     }),
   });
   if (health?.agents) applyAgentSettings(health.agents);
@@ -2510,6 +2570,7 @@ async function send() {
         effort: state.effort,
         mode: state.mode,
         web_search: state.mode === "web" || state.mode === "research",
+        permission_mode: state.agentSettings.permission_mode || "ask",
       }),
       signal: controller.signal,
     });
@@ -2591,6 +2652,8 @@ async function send() {
           const agent = findAgent(tempAsst, event.agent_id) || { id: event.agent_id, content: "", activity: [] };
           agent.guidance = [...(agent.guidance || []), ...(event.notes || [])];
           upsertAgent(tempAsst, agent);
+        } else if (event.type === "permission") {
+          openAsk({ ...event, kind: "perm", noOther: true });
         } else if (event.type === "ask") {
           openAsk(event);
         } else if (event.type === "reset") {
@@ -2979,6 +3042,7 @@ function hideSlash() {
 function askItems() {
   const ask = state.ask;
   if (!ask) return [];
+  if (ask.noOther) return [...(ask.options || [])];
   return [
     ...(ask.options || []),
     { id: "other", label: t("ask.other"), desc: t("ask.otherDesc") },
@@ -3007,6 +3071,8 @@ function openAsk(ev) {
     run_id: ev.run_id || state.crewRunId || null,
     question: ev.question || "",
     options,
+    kind: ev.kind || "ask",
+    noOther: Boolean(ev.noOther),
   };
   state.askIndex = 0;
   state.askOther = false;
@@ -3074,10 +3140,17 @@ async function submitAsk(option, extraText) {
     state.current?.messages.push(tempUser);
     renderMessages();
     try {
-      const res = await fetch("/api/crew/answer", {
+      const endpoint = ask.kind === "perm" ? "/api/perm" : "/api/crew/answer";
+      const payload = ask.kind === "perm"
+        ? { run_id: runId, text: option?.id || text }
+        : { run_id: runId, text: reply };
+      if (ask.kind === "perm" && (option?.id === "auto" || option?.id === "all")) {
+        await setPermissionMode(option.id);
+      }
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ run_id: runId, text: reply }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -3417,6 +3490,26 @@ function bindEvents() {
     const index = Number($("budgetTokens").value) || 0;
     const tokens = BUDGET_STOPS[index] ?? 0;
     if ($("budgetTokensVal")) $("budgetTokensVal").textContent = formatBudget(tokens, true);
+  });
+  $("permBtn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const picker = $("permPicker");
+    const menu = $("permMenu");
+    if (!picker || !menu) return;
+    const open = menu.hidden;
+    menu.hidden = !open;
+    picker.classList.toggle("open", open);
+  });
+  $("permMenu")?.addEventListener("click", async (e) => {
+    const mode = e.target.closest("[data-perm]")?.dataset.perm;
+    if (!mode) return;
+    $("permMenu").hidden = true;
+    $("permPicker")?.classList.remove("open");
+    await setPermissionMode(mode);
+  });
+  document.addEventListener("click", () => {
+    if ($("permMenu")) $("permMenu").hidden = true;
+    $("permPicker")?.classList.remove("open");
   });
   $("budgetTokens")?.addEventListener("change", async () => {
     const index = Number($("budgetTokens").value) || 0;

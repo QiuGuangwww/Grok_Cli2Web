@@ -9,8 +9,12 @@ from server import (
     promote_remaining_contested,
     clamp_budget,
     estimate_usage,
+    execute_local_tool,
+    extract_function_calls,
     format_budget,
     parse_usage,
+    permission_decision,
+    resolve_local_path,
     attach_human_notes,
     can_see_contested,
     collect_merged_ask,
@@ -393,6 +397,37 @@ class LeakTests(unittest.TestCase):
         self.assertTrue(state.budget_hit)
         self.assertFalse(state.can_spend())
         self.assertEqual(state.snapshot()["spend"]["used"], 120)
+
+    def test_local_files_and_permissions(self):
+        self.assertEqual(permission_decision("ask", "read_file"), "ask")
+        self.assertEqual(permission_decision("auto", "read_file"), "allow")
+        self.assertEqual(permission_decision("auto", "write_file"), "deny")
+        self.assertEqual(permission_decision("all", "write_file"), "allow")
+        self.assertEqual(permission_decision("all", "run_command"), "allow")
+        with self.assertRaises(ValueError):
+            resolve_local_path("/etc/passwd")
+        with self.assertRaises(ValueError):
+            resolve_local_path("~/.ssh/id_rsa")
+        with self.assertRaises(ValueError):
+            resolve_local_path("~/.grok/auth.json")
+        here = resolve_local_path(__file__)
+        self.assertTrue(here.is_file())
+        from pathlib import Path as _P
+        self.assertEqual(resolve_local_path("Download"), (_P.home() / "Downloads").resolve())
+        self.assertEqual(resolve_local_path("下载文件夹"), (_P.home() / "Downloads").resolve())
+        text = execute_local_tool("read_file", {"path": __file__, "limit": 5})
+        self.assertIn("import unittest", text)
+        listed = execute_local_tool("list_dir", {"path": str(here.parent)})
+        self.assertIn("test_leak.py", listed)
+        home_list = execute_local_tool("list_dir", {})
+        self.assertTrue(home_list)
+        self.assertNotIn("缺少路径", home_list)
+        self.assertIn("缺少路径", execute_local_tool("read_file", {}))
+        calls = extract_function_calls(
+            {"output": [{"type": "function_call", "name": "read_file", "call_id": "c1", "arguments": '{"path":"~/x"}'}]}
+        )
+        self.assertEqual(calls[0]["name"], "read_file")
+        self.assertEqual(calls[0]["arguments"]["path"], "~/x")
 
 
 if __name__ == "__main__":
