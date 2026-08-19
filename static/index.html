@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Grok</title>
+    <title>AI Chat</title>
     <link rel="icon" href="/assets/favicon.svg?v=18" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/assets/grok-icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -20,7 +20,7 @@
       id="hl-dark"
       disabled
     />
-    <link rel="stylesheet" href="/assets/styles.css?v=58" />
+    <link rel="stylesheet" href="/assets/styles.css?v=62" />
     <style>
       .drop-overlay,
       #dropOverlay {
@@ -36,10 +36,13 @@
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-top">
           <button class="brand" id="brandBtn" type="button" data-i18n-title="newChat">
-            <span class="mark" aria-hidden="true">
-              <img src="/assets/grok-mark.svg" alt="" />
+            <span class="provider-mark" id="brandMark" data-provider="xai" aria-hidden="true">
+              <img id="brandLogo" src="/assets/provider-grok.svg" alt="" />
             </span>
-            <span data-i18n="brand">Grok</span>
+            <span class="brand-copy">
+              <strong id="brandName">Grok</strong>
+              <small id="brandMeta">via xAI</small>
+            </span>
           </button>
           <button class="icon-btn mobile-only" id="closeSidebar" type="button" data-i18n-aria="aria.closeSidebar">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
@@ -256,18 +259,99 @@
           </header>
           <div class="settings-scroll">
             <section class="settings-pane" data-set-pane="account">
-              <div class="field">
-                <label data-i18n="auth.status">登录状态</label>
-                <p class="status-line" id="authStatus">检查中…</p>
+              <div class="provider-hero" id="providerHero" data-provider="xai">
+                <span class="provider-orb" aria-hidden="true"><img id="providerHeroLogo" src="/assets/provider-grok.svg" alt="" /></span>
+                <span class="provider-hero-copy">
+                  <small>当前对话引擎</small>
+                  <strong id="providerHeroName">Grok</strong>
+                  <span id="providerHeroDescription">xAI 原生能力与工具</span>
+                  <span class="provider-auth" id="authStatus">检查中…</span>
+                </span>
+                <span class="connection-pill" id="providerConnection">已选择</span>
               </div>
-              <div class="field">
-                <label for="apiKey" data-i18n="auth.keyLabel">API 密钥（可选）</label>
+
+              <div class="provider-picker-heading">
+                <span>选择服务商</span>
+                <small>模型、思考强度和多 Agent 会同步切换</small>
+              </div>
+              <div class="provider-grid" id="providerGrid">
+                <button class="provider-card active" type="button" data-provider-choice="xai">
+                  <span class="provider-card-mark"><img src="/assets/provider-grok.svg" alt="" /></span><span><strong>Grok</strong><small>xAI 原生工具</small></span>
+                </button>
+                <button class="provider-card" type="button" data-provider-choice="openai">
+                  <span class="provider-card-mark"><img src="/assets/provider-openai.svg" alt="" /></span><span><strong>OpenAI</strong><small>GPT 与推理模型</small></span>
+                </button>
+                <button class="provider-card" type="button" data-provider-choice="claude">
+                  <span class="provider-card-mark"><img src="/assets/provider-claude.svg" alt="" /></span><span><strong>Claude</strong><small>Anthropic API</small></span>
+                </button>
+                <button class="provider-card" type="button" data-provider-choice="gemini">
+                  <span class="provider-card-mark"><img src="/assets/provider-gemini.svg" alt="" /></span><span><strong>Gemini</strong><small>Google AI</small></span>
+                </button>
+                <button class="provider-card" type="button" data-provider-choice="openrouter">
+                  <span class="provider-card-mark"><img src="/assets/provider-openrouter.svg" alt="" /></span><span><strong>OpenRouter</strong><small>聚合多家模型</small></span>
+                </button>
+                <button class="provider-card" type="button" data-provider-choice="generic">
+                  <span class="provider-card-mark"><img src="/assets/provider-generic.svg" alt="" /></span><span><strong>第三方 API</strong><small>自定义网址与模型名</small></span>
+                </button>
+              </div>
+
+              <div class="field provider-select-field">
+                <label for="providerSelect">模型服务商</label>
+                <select id="providerSelect" aria-hidden="true" tabindex="-1">
+                  <option value="xai">xAI</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="claude">Claude</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="generic">第三方兼容 API</option>
+                </select>
+              </div>
+              <div class="field provider-base-row">
+                <label for="providerBaseUrl">第三方 Base URL</label>
+                <input id="providerBaseUrl" type="url" placeholder="例如 https://api.xiaomimimo.com/v1" autocomplete="off" />
+                <p class="help">填写基础地址，不要包含 /chat/completions；仅支持公开 HTTPS 的 OpenAI-compatible 接口。</p>
+              </div>
+              <div class="field provider-key-row" data-provider="xai">
+                <label for="apiKey" data-i18n="auth.keyLabel">xAI API 密钥（可选）</label>
                 <input id="apiKey" type="password" data-i18n-placeholder="auth.keyPh" placeholder="留空则沿用当前登录" autocomplete="off" />
                 <p class="help" data-i18n="auth.keyHelp">密钥仅保存在此设备，可用于覆盖当前登录。</p>
               </div>
+              <div class="field provider-key-row" data-provider="openai">
+                <label for="openaiApiKey">OpenAI API 密钥（可选）</label>
+                <input id="openaiApiKey" type="password" placeholder="留空则使用环境变量 OPENAI_API_KEY" autocomplete="off" />
+                <p class="help">留空则使用环境变量或已保存配置。</p>
+              </div>
+              <div class="field provider-key-row" data-provider="openrouter">
+                <label for="openrouterApiKey">OpenRouter API 密钥（可选）</label>
+                <input id="openrouterApiKey" type="password" placeholder="留空则使用环境变量 OPENROUTER_API_KEY" autocomplete="off" />
+                <p class="help">留空则使用环境变量或已保存配置。</p>
+              </div>
+              <div class="field provider-key-row" data-provider="claude">
+                <label for="claudeApiKey">Claude API 密钥（可选）</label>
+                <input id="claudeApiKey" type="password" placeholder="留空则使用环境变量 ANTHROPIC_API_KEY" autocomplete="off" />
+                <p class="help">留空则使用环境变量或已保存配置。</p>
+              </div>
+              <div class="field provider-key-row" data-provider="gemini">
+                <label for="geminiApiKey">Gemini API 密钥（可选）</label>
+                <input id="geminiApiKey" type="password" placeholder="留空则使用环境变量 GEMINI_API_KEY" autocomplete="off" />
+                <p class="help">留空则使用环境变量或已保存配置。</p>
+              </div>
+              <div class="field provider-key-row" data-provider="generic">
+                <label for="genericApiKey">第三方 API 密钥（可选）</label>
+                <input id="genericApiKey" type="password" placeholder="留空则使用环境变量 LLM_API_KEY" autocomplete="off" />
+                <p class="help">留空则使用环境变量或已保存配置。</p>
+              </div>
+              <div class="field provider-generic-row" hidden>
+                <label for="genericModels">模型 ID</label>
+                <textarea id="genericModels" rows="3" placeholder="每行一个，例如：&#10;mimo-v2.5-pro&#10;mimo-v2.5"></textarea>
+                <p class="help">模型 ID 会原样发送给第三方。可以手填，也可以从该接口的 /models 自动获取。</p>
+                <div class="actions">
+                  <button type="button" class="ghost-btn" id="discoverModels">自动获取模型</button>
+                </div>
+              </div>
               <div class="actions">
                 <button type="button" class="ghost-btn" id="clearKey" data-i18n="auth.clear">清除自定义密钥</button>
-                <button type="button" class="primary-btn" id="saveKey" data-i18n="auth.save">保存密钥</button>
+                <button type="button" class="primary-btn" id="saveKey"><span id="saveKeyLabel">保存并使用当前服务商</span></button>
               </div>
             </section>
             <section class="settings-pane" data-set-pane="agents" hidden>
@@ -390,6 +474,6 @@
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.5/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/common.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js"></script>
-    <script src="/assets/app.js?v=61"></script>
+  <script src="/assets/app.js?v=67"></script>
   </body>
 </html>

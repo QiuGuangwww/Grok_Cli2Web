@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import ipaddress
 import json
 import mimetypes
 import os
@@ -15,6 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import logging
 
@@ -36,9 +38,408 @@ SETTINGS_PATH = DATA_DIR / "settings.json"
 AUTH_PATH = Path.home() / ".grok" / "auth.json"
 SESSIONS_DIR = Path.home() / ".grok" / "sessions"
 XAI_BASE = "https://api.x.ai/v1"
+GENERIC_BASE = "https://api.openai.com/v1"
 MAX_UPLOAD_BYTES = 48 * 1024 * 1024
 IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+
+PROVIDER_ALIASES = {
+    "grok": "xai",
+    "xai": "xai",
+    "claude": "claude",
+    "gemini": "gemini",
+    "openai-compatible": "openai",
+    "open_router": "openrouter",
+    "openrouter": "openrouter",
+    "openai": "openai",
+    "google": "gemini",
+    "generic": "generic",
+}
+PROVIDER_PRESETS = {
+    "xai": {
+        "name": "xAI",
+        "base_env": "XAI_BASE_URL",
+        "base_default": XAI_BASE,
+        "api_key_env": "XAI_API_KEY",
+        "stream_mode": "responses",
+        "efforts": ["low", "medium", "high", "xhigh"],
+        "effort_mode": "responses",
+        "capabilities": ["chat", "think", "code", "write", "multi", "research", "web", "local_tools", "workflows", "media", "usage", "docs", "privacy", "login"],
+        "supports_upload": True,
+        "supports_image_data": True,
+        "usage_url": "https://console.x.ai/team/default/usage",
+        "docs_url": "https://docs.x.ai/build/overview",
+        "privacy_url": "https://console.x.ai",
+    },
+    "openai": {
+        "name": "OpenAI",
+        "base_env": "OPENAI_BASE_URL",
+        "base_default": GENERIC_BASE,
+        "api_key_env": "OPENAI_API_KEY",
+        "stream_mode": "chat",
+        "efforts": ["none", "low", "medium", "high", "xhigh"],
+        "effort_mode": "reasoning_effort",
+        "capabilities": ["chat", "think", "code", "write", "multi", "usage", "docs", "privacy"],
+        "supports_upload": False,
+        "supports_image_data": False,
+        "usage_url": "https://platform.openai.com/usage",
+        "docs_url": "https://platform.openai.com/docs/api-reference",
+        "privacy_url": "https://platform.openai.com/settings/organization/general",
+    },
+    "openrouter": {
+        "name": "OpenRouter",
+        "base_env": "OPENROUTER_BASE_URL",
+        "base_default": "https://openrouter.ai/api/v1",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "stream_mode": "chat",
+        "efforts": ["none", "minimal", "low", "medium", "high", "xhigh"],
+        "effort_mode": "reasoning",
+        "capabilities": ["chat", "think", "code", "write", "multi", "usage", "docs", "privacy"],
+        "supports_upload": False,
+        "supports_image_data": False,
+        "usage_url": "https://openrouter.ai/activity",
+        "docs_url": "https://openrouter.ai/docs",
+        "privacy_url": "https://openrouter.ai/terms",
+    },
+    "claude": {
+        "name": "Claude",
+        "base_env": "ANTHROPIC_BASE_URL",
+        "base_default": "https://api.anthropic.com/v1",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "stream_mode": "chat",
+        "efforts": ["low", "medium", "high", "xhigh"],
+        "effort_mode": "anthropic_thinking",
+        "capabilities": ["chat", "think", "code", "write", "multi", "usage", "docs", "privacy"],
+        "supports_upload": False,
+        "supports_image_data": False,
+        "usage_url": "https://console.anthropic.com/settings/usage",
+        "docs_url": "https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk",
+        "privacy_url": "https://console.anthropic.com/settings/privacy",
+    },
+    "gemini": {
+        "name": "Gemini",
+        "base_env": "GEMINI_BASE_URL",
+        "base_default": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "api_key_env": "GEMINI_API_KEY",
+        "stream_mode": "chat",
+        "efforts": ["minimal", "low", "medium", "high"],
+        "effort_mode": "reasoning_effort",
+        "capabilities": ["chat", "think", "code", "write", "multi", "usage", "docs", "privacy"],
+        "supports_upload": False,
+        "supports_image_data": False,
+        "usage_url": "https://aistudio.google.com/usage",
+        "docs_url": "https://ai.google.dev/gemini-api/docs/openai",
+        "privacy_url": "https://aistudio.google.com/",
+    },
+    "generic": {
+        "name": "第三方兼容 API",
+        "base_env": "LLM_BASE_URL",
+        "base_default": "",
+        "api_key_env": "LLM_API_KEY",
+        "stream_mode": "chat",
+        "efforts": ["none", "minimal", "low", "medium", "high", "xhigh"],
+        "effort_mode": "reasoning_effort",
+        "capabilities": ["chat", "think", "code", "write", "multi"],
+        "supports_upload": False,
+        "supports_image_data": False,
+        "usage_url": "",
+        "docs_url": "",
+        "privacy_url": "",
+    },
+}
+
+KNOWN_PROVIDERS = set(PROVIDER_PRESETS.keys())
+DEFAULT_PROVIDER = "xai"
+
+
+def normalize_provider(raw: str | None) -> str:
+    key = re.sub(r"[^a-z0-9_\\-]", "", str(raw or "").strip().lower())
+    return PROVIDER_ALIASES.get(key, key)
+
+
+def resolve_provider(provider: str | None = None, model: str | None = None) -> str:
+    explicit = normalize_provider(provider)
+    if explicit in KNOWN_PROVIDERS:
+        return explicit
+    model_key = str(model or "").lower().strip()
+    if model_key.startswith("grok-"):
+        return "xai"
+    if "/" in model_key:
+        return "openrouter"
+    inferred = _infer_provider_from_model(model_key)
+    if inferred in KNOWN_PROVIDERS:
+        return inferred
+    cfg = load_settings()
+    configured = normalize_provider(cfg.get("provider"))
+    if configured in KNOWN_PROVIDERS:
+        return configured
+    env_default = normalize_provider(os.environ.get("LLM_PROVIDER"))
+    if env_default in KNOWN_PROVIDERS:
+        return env_default
+    return DEFAULT_PROVIDER
+
+
+def provider_profile(provider: str | None = None, model: str | None = None) -> tuple[str, dict[str, Any]]:
+    key = resolve_provider(provider, model)
+    return key, PROVIDER_PRESETS[key]
+
+
+def provider_secret_field(provider: str) -> str:
+    provider = normalize_provider(provider)
+    if provider == "xai":
+        return "api_key"
+    return f"{provider}_api_key"
+
+
+def provider_base_field(provider: str) -> str:
+    return f"{normalize_provider(provider)}_base_url"
+
+
+def saved_provider_base(provider: str, settings: dict[str, Any] | None = None) -> str:
+    provider = normalize_provider(provider)
+    settings = settings or load_settings()
+    value = str(settings.get(provider_base_field(provider)) or "").strip()
+    if value:
+        return value
+    if normalize_provider(settings.get("provider")) == provider:
+        return str(settings.get("provider_base_url") or "").strip()
+    return ""
+
+
+def validate_generic_base_url(raw: str | None) -> str:
+    value = str(raw or "").strip().rstrip("/")
+    if not value:
+        raise HTTPException(400, "第三方兼容 API 必须填写 Base URL，例如 https://api.xiaomimimo.com/v1")
+    try:
+        parsed = urlparse(value)
+        hostname = (parsed.hostname or "").lower().rstrip(".")
+        if parsed.scheme != "https" or not hostname or parsed.username or parsed.password:
+            raise ValueError
+        if parsed.query or parsed.fragment or parsed.path.rstrip("/").endswith("/chat/completions"):
+            raise ValueError
+        if hostname == "localhost" or hostname.endswith(".localhost") or hostname.endswith(".local"):
+            raise ValueError
+        try:
+            address = ipaddress.ip_address(hostname)
+        except ValueError:
+            address = None
+        if address is not None and not address.is_global:
+            raise ValueError
+    except (TypeError, ValueError):
+        raise HTTPException(400, "第三方 Base URL 必须是公开 HTTPS 基础地址，且不要包含 /chat/completions")
+    return value
+
+
+def _infer_provider_from_model(model: str | None) -> str | None:
+    key = (model or "").strip().lower()
+    if not key:
+        return None
+    if key.startswith("grok-"):
+        return "xai"
+    if "/" in key:
+        return "openrouter"
+    if (
+        key.startswith("gpt-")
+        or key.startswith("o1")
+        or key.startswith("o3")
+        or key.startswith("o4")
+        or "qwen" in key
+        or "yi" in key
+        or "llama" in key
+        or "mistral" in key
+        or "deepseek" in key
+    ):
+        return "openai"
+    if key.startswith("claude") or "claude" in key:
+        return "claude"
+    if key.startswith("gemini") or "gemini" in key:
+        return "gemini"
+    return None
+
+
+def resolve_provider_base(provider: str | None = None, model: str | None = None, base_url: str | None = None) -> str:
+    provider_name, profile = provider_profile(provider, model)
+
+    if provider_name == "generic":
+        settings = load_settings()
+        candidate = (
+            str(base_url or "").strip()
+            or saved_provider_base(provider_name, settings)
+            or os.environ.get(profile["base_env"], "").strip()
+        )
+        return validate_generic_base_url(candidate)
+
+    def _normalized_root(raw: str) -> str:
+        value = str(raw or "").strip().rstrip("/")
+        if not value:
+            return ""
+        try:
+            parsed = urlparse(value)
+            if parsed.scheme in {"http", "https"} and parsed.netloc:
+                return f"{parsed.scheme}://{parsed.netloc}"
+        except Exception:
+            return ""
+        return ""
+
+    trusted_root = _normalized_root(profile["base_default"])
+    if not trusted_root:
+        return profile["base_default"]
+    explicit = _normalized_root(base_url or "")
+    if explicit == trusted_root:
+        return str(base_url).strip().rstrip("/")
+    settings = load_settings()
+    saved_base = saved_provider_base(provider_name, settings)
+    configured = _normalized_root(saved_base)
+    if configured == trusted_root:
+        configured = saved_base.rstrip("/")
+        if configured:
+            return configured
+    env = os.environ.get(profile["base_env"], "").strip().rstrip("/")
+    if env:
+        env_root = _normalized_root(env)
+        if env_root == trusted_root:
+            return env
+    return profile["base_default"]
+
+
+def resolve_tools_for_provider(raw_tools: Any, profile: dict[str, Any]) -> list[dict[str, Any]]:
+    if profile.get("stream_mode") != "responses":
+        return [
+            item
+            for item in (raw_tools or [])
+            if isinstance(item, dict) and str(item.get("type") or "") == "function"
+        ]
+    return list(raw_tools or [])
+
+
+def normalize_openai_tools(raw_tools: Any) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw_tools or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") != "function":
+            continue
+        fn = item.get("function")
+        if isinstance(fn, dict):
+            name = fn.get("name")
+            description = fn.get("description") or item.get("description") or ""
+            params = fn.get("parameters") or item.get("parameters") or {}
+        else:
+            name = item.get("name")
+            description = item.get("description") or ""
+            params = item.get("parameters") or {}
+        if not isinstance(name, str) or not name.strip():
+            continue
+        key = name.strip()
+        if key in seen:
+            continue
+        if not isinstance(description, str):
+            description = ""
+        if not isinstance(params, dict):
+            params = {}
+        out.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": key,
+                    "description": description,
+                    "parameters": params if params else {"type": "object", "properties": {}},
+                },
+            }
+        )
+        seen.add(key)
+    return out
+
+
+def normalize_chat_content(content: Any) -> list[dict[str, str]] | str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    out: list[dict[str, str]] = []
+    text_parts: list[str] = []
+
+    def flush_text() -> None:
+        if text_parts:
+            out.append({"type": "text", "text": "\n".join(text_parts).strip()})
+            text_parts.clear()
+
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        block_type = str(item.get("type") or "").strip()
+        if block_type in {"input_text", "text"}:
+            text = str(item.get("text") or "").strip()
+            if text:
+                text_parts.append(text)
+            continue
+        if block_type in {"input_image", "image"}:
+            src = item.get("image_url") or item.get("url")
+            if isinstance(src, str) and src.strip():
+                flush_text()
+                out.append({"type": "image_url", "image_url": {"url": src.strip()}})
+            continue
+        if block_type in {"input_file", "file"}:
+            fid = str(item.get("file_id") or item.get("id") or "").strip()
+            name = str(item.get("name") or "").strip()
+            if fid:
+                text_parts.append(f"[文件 {fid}]")
+                continue
+            if name:
+                text_parts.append(f"[文件 {name}]")
+            continue
+        if "text" in item and isinstance(item.get("text"), str):
+            text_parts.append(item["text"].strip())
+    flush_text()
+    if not out and text_parts:
+        return "\n".join(text_parts).strip()
+    if text_parts:
+        return out
+    return out if out else ""
+
+
+def prepare_chat_payload(payload: dict[str, Any], provider_profile: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {**payload}
+    reasoning = payload.get("reasoning")
+    effort = str(reasoning.get("effort") or "") if isinstance(reasoning, dict) else ""
+    inp = payload.get("input")
+    messages: list[dict[str, Any]] = []
+    if isinstance(inp, list):
+        for item in inp:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "user").strip() or "user"
+            content = normalize_chat_content(item.get("content"))
+            messages.append({"role": role, "content": content})
+    out["messages"] = messages
+    out.pop("input", None)
+    out.pop("reasoning", None)
+    out.pop("store", None)
+    if provider_profile["stream_mode"] != "responses":
+        out.pop("previous_response_id", None)
+    out["tools"] = resolve_tools_for_provider(out.get("tools"), provider_profile)
+    if not out["tools"]:
+        out.pop("tools", None)
+    if effort and effort != "none":
+        effort_mode = str(provider_profile.get("effort_mode") or "")
+        if effort_mode == "reasoning":
+            out["reasoning"] = {"effort": effort}
+        elif effort_mode == "reasoning_effort":
+            model = str(out.get("model") or "").lower()
+            is_openai_reasoning = model.startswith(("gpt-5", "o1", "o3", "o4"))
+            if provider_profile.get("name") != "OpenAI" or is_openai_reasoning:
+                out["reasoning_effort"] = effort
+        elif effort_mode == "anthropic_thinking":
+            model = str(out.get("model") or "").lower()
+            adaptive_models = ("claude-fable-5", "claude-opus-5", "claude-sonnet-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6")
+            if model.startswith(adaptive_models):
+                out["thinking"] = {"type": "adaptive"}
+                out["output_config"] = {"effort": effort}
+            else:
+                budgets = {"low": 2048, "medium": 4096, "high": 10000, "xhigh": 20000}
+                out["thinking"] = {"type": "enabled", "budget_tokens": budgets.get(effort, 4096)}
+    return out
 
 log = logging.getLogger("grok-chat")
 
@@ -623,14 +1024,24 @@ def grok_session() -> dict[str, Any] | None:
     return best
 
 
-def resolve_auth() -> dict[str, Any]:
-    env_key = os.environ.get("XAI_API_KEY", "").strip()
+def resolve_auth(provider: str | None = None, model: str | None = None, api_key: str | None = None) -> dict[str, Any]:
+    provider_name, profile = provider_profile(provider, model)
+    if api_key and api_key.strip():
+        return {"token": api_key.strip(), "source": "custom", "user": None, "expired": False}
+
+    env_key = os.environ.get(profile["api_key_env"], "").strip()
     if env_key:
         return {"token": env_key, "source": "env", "user": None, "expired": False}
 
-    settings_key = str(load_settings().get("api_key") or "").strip()
+    settings = load_settings()
+    settings_key = str(settings.get(provider_secret_field(provider_name)) or "").strip()
+    if not settings_key and provider_name == "xai":
+        settings_key = str(settings.get("api_key") or "").strip()
     if settings_key:
         return {"token": settings_key, "source": "settings", "user": None, "expired": False}
+
+    if profile["name"] != "xAI":
+        return {"token": "", "source": "none", "user": None, "expired": False}
 
     session = grok_session()
     if session:
@@ -651,12 +1062,17 @@ def resolve_auth() -> dict[str, Any]:
     return {"token": "", "source": "none", "user": None, "expired": False}
 
 
-def require_token() -> str:
-    auth = resolve_auth()
+def require_token(provider: str | None = None, model: str | None = None, api_key: str | None = None) -> str:
+    provider_name, profile = provider_profile(provider, model)
+    auth = resolve_auth(provider_name, model, api_key)
     if auth["expired"]:
-        raise HTTPException(401, "Grok 登录已过期，请在终端运行 grok login")
+        if profile["name"] == "xAI":
+            raise HTTPException(401, "Grok 登录已过期，请在终端运行 grok login")
+        raise HTTPException(401, f"{profile['name']} 密钥已过期，请在设置中更新 {profile['api_key_env']}")
     if not auth["token"]:
-        raise HTTPException(401, "未找到可用凭证。请运行 grok login，或在设置里填入 XAI_API_KEY")
+        if profile["name"] == "xAI":
+            raise HTTPException(401, "未找到可用凭证。请运行 grok login，或在设置里填入 XAI_API_KEY")
+        raise HTTPException(401, f"未找到可用的 {profile['name']} 凭证。请在设置中填写 {profile['api_key_env']}，或通过同名环境变量配置。")
     return auth["token"]
 
 
@@ -1013,6 +1429,8 @@ class ChatIn(BaseModel):
     message: str = ""
     file_ids: list[str] = Field(default_factory=list)
     model: str = "grok-4.6"
+    provider: str | None = None
+    provider_base_url: str | None = None
     web_search: bool = False
     mode: str = "chat"
     effort: str = "high"
@@ -1026,6 +1444,20 @@ class ConversationPatch(BaseModel):
 
 class SettingsIn(BaseModel):
     api_key: str | None = None
+    provider: str | None = None
+    provider_base_url: str | None = None
+    clear_provider_base_url: bool = False
+    openai_api_key: str | None = None
+    openrouter_api_key: str | None = None
+    claude_api_key: str | None = None
+    gemini_api_key: str | None = None
+    generic_api_key: str | None = None
+    generic_models: list[str] | None = None
+    clear_openai_api_key: bool = False
+    clear_openrouter_api_key: bool = False
+    clear_claude_api_key: bool = False
+    clear_gemini_api_key: bool = False
+    clear_generic_api_key: bool = False
     clear_api_key: bool = False
     lead_model: str | None = None
     lead_effort: str | None = None
@@ -1034,6 +1466,11 @@ class SettingsIn(BaseModel):
     worker_count: int | None = None
     budget_tokens: int | None = None
     permission_mode: str | None = None
+
+
+class ProviderModelsIn(BaseModel):
+    base_url: str
+    api_key: str | None = None
 
 
 class GuideIn(BaseModel):
@@ -1054,6 +1491,8 @@ async def index() -> FileResponse:
 
 @app.get("/api/extras")
 async def extras() -> dict[str, Any]:
+    settings = load_settings()
+    profile_name, profile = provider_profile(settings.get("provider"), None)
     workflows: list[dict[str, str]] = []
     roots = [
         Path.home() / ".grok" / "workflows",
@@ -1072,14 +1511,131 @@ async def extras() -> dict[str, Any]:
             workflows.append({"name": key, "path": str(path)})
     return {
         "workflows": workflows,
-        "usage_url": "https://console.x.ai/team/default/usage",
-        "docs_url": "https://docs.x.ai/build/overview",
-        "privacy_url": "https://console.x.ai",
+        "provider": profile_name,
+        "model_catalog": configured_model_catalog(settings),
+        "provider_catalog": {
+            key: {
+                "name": value["name"],
+                "efforts": value.get("efforts") or [],
+                "capabilities": value.get("capabilities") or [],
+            }
+            for key, value in PROVIDER_PRESETS.items()
+        },
+        "provider_base_urls": {"generic": saved_provider_base("generic", settings)},
+        "usage_url": profile["usage_url"],
+        "docs_url": profile["docs_url"],
+        "privacy_url": profile["privacy_url"],
     }
 
 
-KNOWN_MODELS = {"grok-4.6", "grok-4.5", "grok-4.3"}
-KNOWN_EFFORTS = {"low", "medium", "high", "xhigh"}
+KNOWN_MODEL_GROUPS = {
+    "xai": [
+        "grok-4.6",
+        "grok-4.5",
+        "grok-4.3",
+        "grok-build-0.1",
+    ],
+    "openai": [
+        "gpt-5.6",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.5",
+        "gpt-5.4-mini",
+        "gpt-5.4-nano",
+        "gpt-4.1",
+        "gpt-4o",
+        "gpt-4o-mini",
+        "o4-mini",
+        "o3-mini",
+        "o1",
+    ],
+    "openrouter": [
+        "openai/gpt-5.6-sol",
+        "openai/gpt-5.6-terra",
+        "openai/gpt-5.6-luna",
+        "anthropic/claude-fable-5",
+        "anthropic/claude-opus-5",
+        "anthropic/claude-sonnet-5",
+        "google/gemini-3.6-flash",
+        "x-ai/grok-4.3",
+    ],
+    "claude": [
+        "claude-fable-5",
+        "claude-sonnet-5",
+        "claude-opus-5",
+        "claude-haiku-4-5",
+    ],
+    "gemini": [
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-3.1-pro-preview",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+    ],
+    "generic": [
+    ],
+}
+PROVIDER_SECRET_FIELDS = [
+    "api_key",
+    "openai_api_key",
+    "openrouter_api_key",
+    "claude_api_key",
+    "gemini_api_key",
+    "generic_api_key",
+]
+KNOWN_MODELS = {name for group in KNOWN_MODEL_GROUPS.values() for name in group}
+KNOWN_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
+
+
+def parse_model_ids(raw: Any) -> list[str]:
+    values = raw if isinstance(raw, list) else re.split(r"[,\n]", str(raw or ""))
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        model = str(item or "").strip()
+        if not model or model in seen or len(model) > 200:
+            continue
+        out.append(model)
+        seen.add(model)
+        if len(out) >= 50:
+            break
+    return out
+
+
+def configured_model_catalog(settings: dict[str, Any] | None = None) -> dict[str, list[str]]:
+    settings = settings or load_settings()
+    catalog = {key: list(value) for key, value in KNOWN_MODEL_GROUPS.items()}
+    catalog["generic"] = parse_model_ids(settings.get("generic_models"))
+    return catalog
+
+
+def model_group_for_provider(provider: str | None = None, model: str | None = None) -> list[str]:
+    provider_name = normalize_provider(resolve_provider(provider, model))
+    return configured_model_catalog().get(provider_name, KNOWN_MODEL_GROUPS["xai"])
+
+
+def pick_model_for_provider(value: str | None, provider: str | None, model_hint: str | None = None) -> str:
+    group = model_group_for_provider(provider, model_hint or value)
+    fallback = group[0] if group else ""
+    return (value or "").strip() if (value or "").strip() in group else fallback
+
+
+def effort_group_for_provider(provider: str | None = None, model: str | None = None) -> list[str]:
+    _, profile = provider_profile(provider, model)
+    return [str(item) for item in (profile.get("efforts") or ["medium"]) if str(item) in KNOWN_EFFORTS]
+
+
+def pick_effort_for_provider(value: str | None, provider: str | None, fallback: str = "medium") -> str:
+    group = effort_group_for_provider(provider)
+    preferred = str(value or "").strip()
+    if preferred in group:
+        return preferred
+    if fallback in group:
+        return fallback
+    return group[0] if group else "medium"
 
 
 def _pick(value: str | None, allowed: set[str], fallback: str) -> str:
@@ -1525,11 +2081,12 @@ def resolve_perm(run_id: str, text: str) -> bool:
 
 def agent_settings() -> dict[str, Any]:
     raw = load_settings()
+    provider_name = resolve_provider(raw.get("provider"), None)
     return {
-        "lead_model": _pick(raw.get("lead_model"), KNOWN_MODELS, "grok-4.6"),
-        "lead_effort": _pick(raw.get("lead_effort"), KNOWN_EFFORTS, "high"),
-        "worker_model": _pick(raw.get("worker_model"), KNOWN_MODELS, "grok-4.5"),
-        "worker_effort": _pick(raw.get("worker_effort"), KNOWN_EFFORTS, "medium"),
+        "lead_model": pick_model_for_provider(raw.get("lead_model"), provider_name, raw.get("lead_model")),
+        "lead_effort": pick_effort_for_provider(raw.get("lead_effort"), provider_name, "high"),
+        "worker_model": pick_model_for_provider(raw.get("worker_model"), provider_name, raw.get("worker_model")),
+        "worker_effort": pick_effort_for_provider(raw.get("worker_effort"), provider_name, "medium"),
         "worker_count": clamp_workers(raw.get("worker_count"), 3),
         "budget_tokens": clamp_budget(raw.get("budget_tokens"), 0),
         "permission_mode": clamp_perm(raw.get("permission_mode"), "ask"),
@@ -1538,13 +2095,21 @@ def agent_settings() -> dict[str, Any]:
 
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
-    auth = resolve_auth()
+    settings = load_settings()
+    provider_name = resolve_provider(settings.get("provider"), None)
+    auth = resolve_auth(provider_name)
+    key_field = provider_secret_field(provider_name)
+    custom_key = str(settings.get(key_field) or "").strip() or (
+        str(settings.get("api_key") or "").strip() if provider_name == "xai" else ""
+    )
     return {
         "ok": bool(auth["token"]) and not auth["expired"],
         "source": auth["source"],
         "expired": auth["expired"],
         "user": auth["user"],
-        "has_custom_key": bool(str(load_settings().get("api_key") or "").strip()),
+        "provider": provider_name,
+        "provider_base_url": saved_provider_base(provider_name, settings),
+        "has_custom_key": bool(custom_key),
         "agents": agent_settings(),
     }
 
@@ -1552,8 +2117,25 @@ async def health() -> dict[str, Any]:
 @app.post("/api/settings")
 async def update_settings(body: SettingsIn) -> dict[str, Any]:
     patch: dict[str, Any] = {}
+    settings = load_settings()
+    current_provider = resolve_provider(body.provider or settings.get("provider"), None)
+    if body.provider is not None:
+        current_provider = resolve_provider(body.provider, None)
+        patch["provider"] = current_provider
+    base_field = provider_base_field(current_provider)
+    if body.provider_base_url is not None:
+        base_url = body.provider_base_url.strip()
+        if base_url:
+            if current_provider == "generic":
+                base_url = validate_generic_base_url(base_url)
+            patch[base_field] = base_url
+        else:
+            settings.pop(base_field, None)
+            write_json(SETTINGS_PATH, settings)
+    if body.clear_provider_base_url:
+        settings.pop(base_field, None)
+        write_json(SETTINGS_PATH, settings)
     if body.clear_api_key:
-        settings = load_settings()
         settings.pop("api_key", None)
         write_json(SETTINGS_PATH, settings)
     elif body.api_key is not None:
@@ -1561,17 +2143,32 @@ async def update_settings(body: SettingsIn) -> dict[str, Any]:
         if key:
             patch["api_key"] = key
         else:
-            settings = load_settings()
             settings.pop("api_key", None)
             write_json(SETTINGS_PATH, settings)
+    for field in PROVIDER_SECRET_FIELDS:
+        clear_field = f"clear_{field}"
+        if field != "api_key":
+            if getattr(body, clear_field, False):
+                settings.pop(field, None)
+                write_json(SETTINGS_PATH, settings)
+            incoming = getattr(body, field)
+            if incoming is not None:
+                value = str(incoming or "").strip()
+                if value:
+                    patch[field] = value
+                else:
+                    settings.pop(field, None)
+                    write_json(SETTINGS_PATH, settings)
+    if body.generic_models is not None:
+        patch["generic_models"] = parse_model_ids(body.generic_models)
     if body.lead_model:
-        patch["lead_model"] = _pick(body.lead_model, KNOWN_MODELS, "grok-4.6")
+        patch["lead_model"] = pick_model_for_provider(body.lead_model, current_provider, body.lead_model)
     if body.lead_effort:
-        patch["lead_effort"] = _pick(body.lead_effort, KNOWN_EFFORTS, "high")
+        patch["lead_effort"] = pick_effort_for_provider(body.lead_effort, current_provider, "high")
     if body.worker_model:
-        patch["worker_model"] = _pick(body.worker_model, KNOWN_MODELS, "grok-4.5")
+        patch["worker_model"] = pick_model_for_provider(body.worker_model, current_provider, body.worker_model)
     if body.worker_effort:
-        patch["worker_effort"] = _pick(body.worker_effort, KNOWN_EFFORTS, "medium")
+        patch["worker_effort"] = pick_effort_for_provider(body.worker_effort, current_provider, "medium")
     if body.worker_count is not None:
         patch["worker_count"] = clamp_workers(body.worker_count, 3)
     if body.budget_tokens is not None:
@@ -1581,6 +2178,32 @@ async def update_settings(body: SettingsIn) -> dict[str, Any]:
     if patch:
         save_settings(patch)
     return await health()
+
+
+@app.post("/api/provider-models")
+async def discover_provider_models(body: ProviderModelsIn) -> dict[str, Any]:
+    base_url = validate_generic_base_url(body.base_url)
+    token = str(body.api_key or "").strip()
+    if not token:
+        token = resolve_auth("generic").get("token") or ""
+    if not token:
+        raise HTTPException(401, "请先填写第三方 API Key，或配置 LLM_API_KEY")
+    async with async_client(timeout=httpx.Timeout(30.0, connect=15.0)) as client:
+        resp = await client.get(
+            f"{base_url}/models",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        )
+    if resp.status_code >= 400:
+        raise HTTPException(resp.status_code, extract_error_message(resp.text))
+    try:
+        data = resp.json()
+    except json.JSONDecodeError:
+        raise HTTPException(502, "该地址的 /models 没有返回 JSON，请手动填写模型 ID")
+    items = data.get("data") if isinstance(data, dict) else None
+    models = parse_model_ids([item.get("id") for item in (items or []) if isinstance(item, dict)])
+    if not models:
+        raise HTTPException(502, "没有从 /models 发现模型，请手动填写模型 ID")
+    return {"models": models}
 
 
 @app.post("/api/crew/guide")
@@ -1728,8 +2351,11 @@ async def serve_file(local_id: str) -> FileResponse:
 
 
 async def build_user_content(
-    token: str, text: str, file_ids: list[str]
+    token: str, text: str, file_ids: list[str], provider: str | None = None
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    _, profile = provider_profile(provider)
+    supports_upload = bool(profile.get("supports_upload"))
+    supports_image_data = bool(profile.get("supports_image_data"))
     content: list[dict[str, Any]] = []
     public_files: list[dict[str, Any]] = []
     for fid in file_ids:
@@ -1745,15 +2371,17 @@ async def build_user_content(
             "url": f"/api/files/{fid}",
         }
         public_files.append(public)
-        if kind == "image" and mime in {"image/jpeg", "image/jpg", "image/png"}:
+        if kind == "image" and supports_image_data and mime in {"image/jpeg", "image/jpg", "image/png"}:
             content.append({"type": "input_image", "image_url": file_to_data_url(path, mime)})
-        else:
+        elif supports_upload:
             remote_id = meta.get("remote_id")
             if not remote_id:
                 remote_id = await upload_remote_file(token, path, name)
                 meta["remote_id"] = remote_id
                 write_json(path.with_suffix(path.suffix + ".meta.json"), meta)
             content.append({"type": "input_file", "file_id": remote_id})
+        else:
+            content.append({"type": "input_text", "text": f"[文件 {name}]"})
     if text.strip():
         content.insert(0, {"type": "input_text", "text": text.strip()})
     elif not content:
@@ -1797,6 +2425,102 @@ def extract_output_text(data: dict[str, Any]) -> str:
         if item.get("type") == "output_text" and item.get("text"):
             chunks.append(str(item["text"]))
     return visible_answer("".join(chunks) or str(data.get("output_text") or ""))
+
+
+def extract_chat_output_text(data: dict[str, Any]) -> str:
+    choices = data.get("choices")
+    if isinstance(choices, list) and choices:
+        first = choices[0]
+        if isinstance(first, dict):
+            msg = first.get("message") if isinstance(first.get("message"), dict) else {}
+            text = msg.get("content") if isinstance(msg, dict) else None
+            if isinstance(text, str):
+                return visible_answer(text)
+    return visible_answer(str(data.get("choices") or data.get("output_text") or data.get("content") or ""))
+
+
+def extract_chat_delta(data: dict[str, Any]) -> str:
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return ""
+    delta = choices[0].get("delta")
+    if not isinstance(delta, dict):
+        return ""
+    content = delta.get("content")
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for item in content:
+        if isinstance(item, dict) and isinstance(item.get("text"), str):
+            parts.append(item["text"])
+    return "".join(parts)
+
+
+async def chat_completion_stream(
+    token: str,
+    payload: dict[str, Any],
+    provider: str,
+    base_url: str | None = None,
+):
+    provider_name, profile = provider_profile(provider, str(payload.get("model") or ""))
+    request_payload = prepare_chat_payload(payload, profile)
+    request_payload["stream"] = True
+    # Local tools currently use the xAI Responses event protocol. Do not expose
+    # them to another provider until its tool-result loop is adapted as well.
+    request_payload.pop("tools", None)
+    endpoint = f"{resolve_provider_base(provider_name, request_payload.get('model'), base_url)}/chat/completions"
+    collected: list[str] = []
+    try:
+        async with async_client(timeout=httpx.Timeout(3600.0, connect=30.0)) as client:
+            async with client.stream(
+                "POST",
+                endpoint,
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json=request_payload,
+            ) as resp:
+                if resp.status_code >= 400:
+                    raw = (await resp.aread()).decode("utf-8", errors="replace")
+                    yield {"type": "error", "message": extract_error_message(raw)}
+                    return
+                async for line in resp.aiter_lines():
+                    line = line.strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data_str = line[5:].strip()
+                    if not data_str:
+                        continue
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+                    delta = extract_chat_delta(event)
+                    if delta:
+                        collected.append(delta)
+                        yield {"type": "delta", "text": delta}
+    except httpx.HTTPError as exc:
+        yield {"type": "error", "message": f"{profile['name']} 请求失败：{exc}"}
+        return
+    yield {"type": "done", "text": visible_answer("".join(collected)), "response_id": None}
+
+
+async def provider_stream_local(
+    token: str,
+    payload: dict[str, Any],
+    provider: str,
+    base_url: str | None = None,
+    perm: dict[str, Any] | None = None,
+):
+    provider_name, profile = provider_profile(provider, str(payload.get("model") or ""))
+    if profile["stream_mode"] == "responses":
+        async for event in xai_stream_local(token, payload, perm):
+            yield event
+        return
+    async for event in chat_completion_stream(token, payload, provider_name, base_url):
+        yield event
 
 
 def _fallback_model(model: str) -> str | None:
@@ -3061,6 +3785,11 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
     lead_effort = cfg.get("lead_effort") or "high"
     worker_model = cfg.get("worker_model") or "grok-4.5"
     worker_effort = cfg.get("worker_effort") or "medium"
+    provider = resolve_provider(cfg.get("provider"), lead_model)
+    provider_base_url = str(cfg.get("provider_base_url") or "").strip() or None
+    crew_tools = local_tools_for(clamp_perm(cfg.get("permission_mode"), "ask")) if provider == "xai" else []
+    crew_tool_rule = f"{TOOL_RULE} {local_rule()}" if provider == "xai" else ""
+    crew_mode_prompt = MODE_PROMPTS["multi"] if provider == "xai" else "You are the lead orchestrator. Synthesize the specialist reports into one accurate answer."
     wanted_workers = clamp_workers(cfg.get("worker_count"), 3)
     budget_tokens = clamp_budget(cfg.get("budget_tokens"), 0)
     policy = budget_policy(budget_tokens, wanted_workers)
@@ -3110,14 +3839,13 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
         "model": lead_model,
         "stream": True,
         "store": True,
-        "tools": local_tools_for(crew_perm.get("mode") or "ask"),
+        "tools": crew_tools,
         "reasoning": {"effort": plan_effort},
         "input": [
             {
                 "role": "system",
                 "content": (
-                    f"You are the lead orchestrator. {local_rule()} "
-                    "If the user names a local project, inspect it with list_dir/read_file before splitting work. "
+                    f"You are the lead orchestrator. {crew_tool_rule} "
                     "Split the request into 2-4 STEPS. "
                     "Independent steps run at the same time. A step may have several specialist workers in parallel, "
                     "plus a step lead who aligns their progress. "
@@ -3139,7 +3867,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
         ],
     }
     try:
-        async for ev in xai_stream_local(token, plan_payload, crew_perm):
+        async for ev in provider_stream_local(token, plan_payload, provider, provider_base_url, crew_perm):
             if ev["type"] == "delta":
                 plan_raw += ev.get("text") or ""
             elif ev["type"] == "done":
@@ -3169,7 +3897,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
             plan_payload["input"][-1] = {"role": "user", "content": brief}
             plan_raw = ""
             try:
-                async for ev in xai_stream_local(token, plan_payload, crew_perm):
+                async for ev in provider_stream_local(token, plan_payload, provider, provider_base_url, crew_perm):
                     if ev["type"] == "delta":
                         plan_raw += ev.get("text") or ""
                     elif ev["type"] == "done":
@@ -3286,7 +4014,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
         if isinstance(payload.get("reasoning"), dict):
             effort = str(payload["reasoning"].get("effort") or worker_effort)
         try:
-            async for ev in xai_stream_local(token, payload, crew_perm):
+            async for ev in provider_stream_local(token, payload, provider, provider_base_url, crew_perm):
                 if ev["type"] == "reset":
                     full = ""
                     await queue.put({"type": "agent-reset", "agent_id": spec["id"]})
@@ -3414,14 +4142,14 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
             "model": worker_model,
             "stream": True,
             "store": True,
-            "tools": local_tools_for(crew_perm.get("mode") or "ask"),
+            "tools": crew_tools,
             "reasoning": {"effort": worker_effort},
             "input": [
                 {
                     "role": "system",
                     "content": (
                         f"You are sub-agent {spec['name']} in step「{step.get('name') or spec.get('step_name') or ''}」. "
-                        f"{TOOL_RULE} {local_rule()} {FEEDBACK_RULE} {GOAL_PIN} "
+                        f"{crew_tool_rule} {FEEDBACK_RULE} {GOAL_PIN} "
                         f"Plan version v{machine.plan_version}. "
                         "If a changelog is attached, those premises replaced older ones — do not keep working from stale instructions. "
                         f"Your assignment: {brief}. "
@@ -3491,13 +4219,13 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                 "model": worker_model,
                 "stream": True,
                 "store": True,
-                "tools": local_tools_for(crew_perm.get("mode") or "ask"),
+                "tools": crew_tools,
                 "reasoning": {"effort": worker_effort},
                 "input": [
                     {
                         "role": "system",
                         "content": (
-                            f"You are the verify specialist {spec.get('name')}. {TOOL_RULE} {local_rule()} {FEEDBACK_RULE} {GOAL_PIN} "
+                            f"You are the verify specialist {spec.get('name')}. {crew_tool_rule} {FEEDBACK_RULE} {GOAL_PIN} "
                             "Your only job is to settle CONTESTED contract claims. Search or check sources. "
                             "If one side has a better source, emit that fact. "
                             "If both sides stay equally sourced — official channels disagree — emit BOTH claims with sources. "
@@ -3722,7 +4450,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                     {
                         "role": "system",
                         "content": (
-                            f"You are the step lead for「{step['name']}」. {TOOL_RULE} {GOAL_PIN} "
+                            f"You are the step lead for「{step['name']}」. {crew_tool_rule} {GOAL_PIN} "
                             "Write a short coordination note: who does what in parallel, "
                             "what contract fields they should emit, when to ask another specialist instead of guessing, "
                             "and when this step is done. No final product."
@@ -3792,7 +4520,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                     {
                         "role": "system",
                         "content": (
-                            f"You are the step lead for「{step['name']}」. {TOOL_RULE} {GOAL_PIN} {FEEDBACK_RULE} "
+                            f"You are the step lead for「{step['name']}」. {crew_tool_rule} {GOAL_PIN} {FEEDBACK_RULE} "
                             "Align the parallel workers: resolve conflicts, keep facts, "
                             "emit contract facts for later steps. Later specialists will NOT see these essays — only your facts. "
                             "Not the final user answer."
@@ -3945,13 +4673,13 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
             "model": lead_model,
             "stream": True,
             "store": True,
-            "tools": local_tools_for(crew_perm.get("mode") or "ask"),
+            "tools": crew_tools,
             "reasoning": {"effort": plan_effort},
             "input": [
                 {
                     "role": "system",
                     "content": (
-                        f"You are the reviewer. {TOOL_RULE} {local_rule()} "
+                        f"You are the reviewer. {crew_tool_rule} "
                         "You may send work back to the lead. Do not invent missing work or write the final user answer. "
                         "The score below is the stop rule: if coverage>=0.67, conflicts=0, and acceptance>=0.5, prefer pass. "
                         "After a short critique, emit control JSON: "
@@ -4070,7 +4798,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
                         {
                             "role": "system",
                             "content": (
-                                f"You are the step lead for「{step['name']}」. {TOOL_RULE} "
+                                f"You are the step lead for「{step['name']}」. {crew_tool_rule} "
                                 "Realign after a rework round. Keep facts, resolve conflicts, "
                                 "write a concise step report. Not the final user answer."
                             ),
@@ -4116,10 +4844,10 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
         "model": lead_model,
         "stream": True,
         "store": True,
-        "tools": local_tools_for(crew_perm.get("mode") or "ask"),
+        "tools": crew_tools,
         "reasoning": {"effort": lead_effort},
         "input": [
-            {"role": "system", "content": f"{MODE_PROMPTS['multi']} {TOOL_RULE} {local_rule()} {ASK_RULE} {GOAL_PIN}"},
+            {"role": "system", "content": f"{crew_mode_prompt} {crew_tool_rule} {ASK_RULE} {GOAL_PIN}"},
             {
                 "role": "user",
                 "content": (
@@ -4141,7 +4869,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
     lead_activity: list[dict[str, Any]] = []
     lead_text = ""
     response_id = None
-    async for ev in xai_stream_local(token, synth_payload, crew_perm):
+    async for ev in provider_stream_local(token, synth_payload, provider, provider_base_url, crew_perm):
         if ev["type"] == "reset":
             lead_text = ""
             yield ev
@@ -4190,7 +4918,7 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
             last = synth_payload["input"][-1]
             last["content"] = f"{last.get('content') or ''}\n\nUser decision:\n{choice}\nWrite the final answer now. Do not ask again."
             lead_text = ""
-            async for ev in xai_stream_local(token, synth_payload, crew_perm):
+            async for ev in provider_stream_local(token, synth_payload, provider, provider_base_url, crew_perm):
                 if ev["type"] == "reset":
                     lead_text = ""
                     yield ev
@@ -4266,15 +4994,25 @@ async def run_crew(token: str, question: str, cfg: dict[str, Any], history: str 
 
 @app.post("/api/chat")
 async def chat(body: ChatIn) -> StreamingResponse:
-    token = require_token()
     text = (body.message or "").strip()
     if not text and not body.file_ids:
         raise HTTPException(400, "请输入内容或上传文件")
-
-    model = (body.model or "grok-4.6").strip() or "grok-4.6"
-    effort = (body.effort or "high").strip().lower()
-    if effort not in {"low", "medium", "high", "xhigh"}:
-        effort = "high"
+    provider = resolve_provider(body.provider, body.model)
+    model = pick_model_for_provider(body.model, provider, body.model)
+    profile = PROVIDER_PRESETS[provider]
+    token = require_token(provider, model)
+    model = (model or "grok-4.6").strip() or "grok-4.6"
+    mode = (body.mode or "chat").strip().lower()
+    if mode not in MODE_PROMPTS:
+        mode = "chat"
+    capabilities = set(profile.get("capabilities") or [])
+    if mode in {"research", "web"} and "web" not in capabilities:
+        raise HTTPException(400, f"{profile['name']} 当前接口没有接入联网搜索，请切换 xAI 或普通对话。")
+    if mode == "multi" and "multi" not in capabilities:
+        raise HTTPException(400, f"{profile['name']} 当前不支持多 Agent。")
+    effort = pick_effort_for_provider(body.effort, provider, "high")
+    if provider == "generic" and not model:
+        raise HTTPException(400, "请先在设置中填写第三方接口的模型 ID")
     if body.conversation_id:
         reject_cli_write(body.conversation_id)
         convo = get_conversation(body.conversation_id)
@@ -4289,7 +5027,7 @@ async def chat(body: ChatIn) -> StreamingResponse:
             "messages": [],
         }
 
-    user_content, public_files = await build_user_content(token, text, body.file_ids)
+    user_content, public_files = await build_user_content(token, text, body.file_ids, provider)
     user_msg = {
         "id": str(uuid.uuid4()),
         "role": "user",
@@ -4314,9 +5052,6 @@ async def chat(body: ChatIn) -> StreamingResponse:
         convo["title"] = title_from_text(public_files[0]["name"])
     upsert_conversation(convo)
 
-    mode = (body.mode or "chat").strip().lower()
-    if mode not in MODE_PROMPTS:
-        mode = "chat"
     convo["mode"] = mode
 
     if mode == "multi":
@@ -4343,6 +5078,12 @@ async def chat(body: ChatIn) -> StreamingResponse:
                 history = compact_history(convo.get("messages") or [], {user_msg["id"], assistant_msg["id"]})
                 crew_cfg = agent_settings()
                 crew_cfg["permission_mode"] = clamp_perm(body.permission_mode or crew_cfg.get("permission_mode"), "ask")
+                crew_cfg["provider"] = provider
+                crew_cfg["provider_base_url"] = body.provider_base_url
+                crew_cfg["lead_model"] = pick_model_for_provider(crew_cfg.get("lead_model"), provider, model)
+                crew_cfg["worker_model"] = pick_model_for_provider(crew_cfg.get("worker_model"), provider, model)
+                crew_cfg["lead_effort"] = pick_effort_for_provider(crew_cfg.get("lead_effort"), provider, effort)
+                crew_cfg["worker_effort"] = pick_effort_for_provider(crew_cfg.get("worker_effort"), provider, "medium")
                 async for ev in run_crew(token, text, crew_cfg, history):
                     kind = ev.get("type")
                     if kind == "crew-run":
@@ -4478,19 +5219,30 @@ async def chat(body: ChatIn) -> StreamingResponse:
         )
 
     perm_mode = clamp_perm(body.permission_mode or agent_settings().get("permission_mode"), "ask")
-    system_prompt = f"{MODE_PROMPTS[mode]} {TOOL_RULE} {ASK_RULE} {local_rule()}"
+    if provider == "xai":
+        system_prompt = f"{MODE_PROMPTS[mode]} {TOOL_RULE} {ASK_RULE} {local_rule()}"
+    else:
+        system_prompt = (
+            f"You are a helpful, sharp, and warm assistant powered by {profile['name']}. "
+            "Reply in the user's language. Use clean Markdown. Be concise unless the user wants depth."
+        )
     payload: dict[str, Any] = {
         "model": model,
         "stream": True,
-        "store": True,
-        "tools": local_tools_for(perm_mode),
         "reasoning": {"effort": effort},
         "input": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ],
     }
-    if convo.get("previous_response_id"):
+    if provider == "xai":
+        payload.update(
+            {
+                "store": True,
+                "tools": local_tools_for(perm_mode),
+            }
+        )
+    if provider == "xai" and convo.get("previous_response_id"):
         payload["previous_response_id"] = convo["previous_response_id"]
         payload["input"] = [
             {"role": "system", "content": f"{TOOL_RULE} {local_rule()}"},
@@ -4518,7 +5270,7 @@ async def chat(body: ChatIn) -> StreamingResponse:
         full = ""
         perm_run = open_perm_run()
         perm_state = {"mode": perm_mode, "run_id": perm_run, "crew": False, "lock": asyncio.Lock()}
-        wants_search = bool(
+        wants_search = provider == "xai" and bool(
             body.web_search
             or mode in {"research", "web"}
             or re.search(r"搜|search|查一下|联网|最新", text, re.I)
@@ -4526,7 +5278,8 @@ async def chat(body: ChatIn) -> StreamingResponse:
         if wants_search:
             yield sse({"type": "status", "text": "正在搜索…"})
         try:
-            async for ev in xai_stream_local(token, payload, perm_state):
+            stream_events = provider_stream_local(token, payload, provider, body.provider_base_url, perm_state)
+            async for ev in stream_events:
                 kind = ev.get("type")
                 if kind == "reset":
                     full = ""

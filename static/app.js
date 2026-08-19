@@ -6,12 +6,51 @@ const MODELS = [
   { id: "grok-4.3", name: "Grok 4.3", desc: "超长上下文，适合大文档" },
 ];
 
+const PROVIDERS = [
+  { id: "xai", name: "xAI" },
+  { id: "openai", name: "OpenAI" },
+  { id: "openrouter", name: "OpenRouter" },
+  { id: "claude", name: "Claude" },
+  { id: "gemini", name: "Gemini" },
+  { id: "generic", name: "第三方兼容 API" },
+];
+
 const EFFORTS = [
+  { id: "none", name: "Off", desc: "不发送思考强度参数，适合不兼容该参数的接口" },
+  { id: "minimal", name: "Minimal", desc: "最少思考，优先速度和成本" },
   { id: "low", name: "Low", desc: "更快，适合简单问题和工具调用" },
   { id: "medium", name: "Medium", desc: "更均衡，适合分析和长上下文" },
   { id: "high", name: "High", desc: "默认。更深，适合难题和多步推理" },
   { id: "xhigh", name: "Extra high", desc: "最深，更慢，适合最难的问题" },
 ];
+
+const DEFAULT_PROVIDER_META = {
+  xai: { efforts: ["low", "medium", "high", "xhigh"], capabilities: ["chat", "think", "code", "write", "multi", "research", "web", "local_tools", "workflows", "media", "usage", "docs", "privacy", "login"] },
+  openai: { efforts: ["none", "low", "medium", "high", "xhigh"], capabilities: ["chat", "think", "code", "write", "multi", "usage", "docs", "privacy"] },
+  openrouter: { efforts: ["none", "minimal", "low", "medium", "high", "xhigh"], capabilities: ["chat", "think", "code", "write", "multi", "usage", "docs", "privacy"] },
+  claude: { efforts: ["low", "medium", "high", "xhigh"], capabilities: ["chat", "think", "code", "write", "multi", "usage", "docs", "privacy"] },
+  gemini: { efforts: ["minimal", "low", "medium", "high"], capabilities: ["chat", "think", "code", "write", "multi", "usage", "docs", "privacy"] },
+  generic: { efforts: ["none", "minimal", "low", "medium", "high", "xhigh"], capabilities: ["chat", "think", "code", "write", "multi"] },
+};
+
+const SLASH_CAPABILITY = {
+  research: "web",
+  web: "web",
+  "deep-research": "web",
+  multi: "multi",
+  workflow: "workflows",
+  workflows: "workflows",
+  goal: "workflows",
+  loop: "workflows",
+  imagine: "media",
+  "imagine-video": "media",
+  usage: "usage",
+  login: "login",
+  privacy: "privacy",
+  docs: "docs",
+  "release-notes": "docs",
+  tutorial: "docs",
+};
 
 const THEMES = [
   { id: "light", key: "theme.light", dark: false },
@@ -56,6 +95,12 @@ const LANGS = [
   { id: "en", name: "English", short: "EN" },
   { id: "ja", name: "日本語", short: "日本語" },
 ];
+
+const MODEL_BY_ID = Object.fromEntries(MODELS.map((m) => [m.id, m]));
+
+function normalizeProvider(value) {
+  return String(value || "xai").trim().toLowerCase().replace(/[^a-z0-9_]/g, "") || "xai";
+}
 
 const I18N = {
   zh: {
@@ -151,8 +196,8 @@ const I18N = {
     "auth.save": "保存密钥",
     "auth.expiredSub": "登录已过期",
     "auth.noneSub": "未登录",
-    "auth.expired": "Grok 登录已过期，请在终端运行 grok login。",
-    "auth.missing": "未找到凭证。请运行 grok login，或在下方填入 XAI_API_KEY。",
+    "auth.expired": "当前服务商的登录或 API 密钥已过期，请重新配置凭证。",
+    "auth.missing": "未找到当前服务商的 API 凭证。请在下方填写并保存对应的 API 密钥。",
     "auth.grok": "已使用当前 Grok 登录",
     "auth.env": "使用环境变量密钥",
     "auth.custom": "使用自定义密钥",
@@ -235,6 +280,23 @@ const I18N = {
     "model.grok-4.6.desc": "最强推理，适合难问题和长任务",
     "model.grok-4.5.desc": "更均衡，日常对话更快一些",
     "model.grok-4.3.desc": "超长上下文，适合大文档",
+    "model.provider.xai.desc": "xAI 对话、推理与代码模型",
+    "model.provider.openai.desc": "OpenAI 对话、推理与代码模型",
+    "model.provider.openrouter.desc": "通过 OpenRouter 调用的聚合模型",
+    "model.provider.claude.desc": "Anthropic 对话、推理与代码模型",
+    "model.provider.gemini.desc": "Google 多模态、推理与代码模型",
+    "model.provider.generic.desc": "第三方兼容接口提供的模型",
+    "model.generic.desc": "用于对话、推理和代码生成",
+    "model.empty.name": "请先配置模型",
+    "model.empty.desc": "请在设置中填写模型 ID",
+    "effort.none.name": "关闭",
+    "effort.minimal.name": "最少",
+    "effort.low.name": "较低",
+    "effort.medium.name": "中等",
+    "effort.high.name": "较高",
+    "effort.xhigh.name": "最高",
+    "effort.none.desc": "不发送思考强度参数，适合不兼容的接口",
+    "effort.minimal.desc": "最少思考，优先速度和成本",
     "effort.low.desc": "更快，适合简单问题和工具调用",
     "effort.medium.desc": "更均衡，适合分析和长上下文",
     "effort.high.desc": "默认。更深，适合难题和多步推理",
@@ -333,8 +395,8 @@ const I18N = {
     "auth.save": "Save key",
     "auth.expiredSub": "Login expired",
     "auth.noneSub": "Not signed in",
-    "auth.expired": "Grok login expired. Run grok login in a terminal.",
-    "auth.missing": "No credentials. Run grok login, or paste an XAI_API_KEY below.",
+    "auth.expired": "The current provider login or API key has expired. Configure its credentials again.",
+    "auth.missing": "No API credentials were found for the current provider. Enter and save its API key below.",
     "auth.grok": "Using current Grok login",
     "auth.env": "Using environment key",
     "auth.custom": "Using custom key",
@@ -417,6 +479,23 @@ const I18N = {
     "model.grok-4.6.desc": "Strongest reasoning for hard, long tasks",
     "model.grok-4.5.desc": "More balanced, a bit faster day to day",
     "model.grok-4.3.desc": "Very long context for large documents",
+    "model.provider.xai.desc": "xAI model for chat, reasoning, and coding",
+    "model.provider.openai.desc": "OpenAI model for chat, reasoning, and coding",
+    "model.provider.openrouter.desc": "Aggregated model served through OpenRouter",
+    "model.provider.claude.desc": "Anthropic model for chat, reasoning, and coding",
+    "model.provider.gemini.desc": "Google model for multimodal work, reasoning, and coding",
+    "model.provider.generic.desc": "Model supplied by an OpenAI-compatible endpoint",
+    "model.generic.desc": "For chat, reasoning, and code generation",
+    "model.empty.name": "Configure a model first",
+    "model.empty.desc": "Enter a model ID in Settings",
+    "effort.none.name": "Off",
+    "effort.minimal.name": "Minimal",
+    "effort.low.name": "Low",
+    "effort.medium.name": "Medium",
+    "effort.high.name": "High",
+    "effort.xhigh.name": "Extra high",
+    "effort.none.desc": "Do not send a reasoning-effort parameter",
+    "effort.minimal.desc": "Minimal reasoning for the lowest latency and cost",
     "effort.low.desc": "Faster, good for simple questions and tools",
     "effort.medium.desc": "Balanced, good for analysis and long context",
     "effort.high.desc": "Default. Deeper, for hard multi-step work",
@@ -515,8 +594,8 @@ const I18N = {
     "auth.save": "キーを保存",
     "auth.expiredSub": "ログイン期限切れ",
     "auth.noneSub": "未ログイン",
-    "auth.expired": "Grok ログインの期限が切れました。端末で grok login を実行してください。",
-    "auth.missing": "認証情報が見つかりません。grok login するか、下に XAI_API_KEY を入れてください。",
+    "auth.expired": "現在のプロバイダーのログインまたは API キーの有効期限が切れています。認証情報を再設定してください。",
+    "auth.missing": "現在のプロバイダーの API 認証情報が見つかりません。下に対応する API キーを入力して保存してください。",
     "auth.grok": "現在の Grok ログインを使用中",
     "auth.env": "環境変数のキーを使用中",
     "auth.custom": "カスタムキーを使用中",
@@ -599,6 +678,23 @@ const I18N = {
     "model.grok-4.6.desc": "最も強い推論。難しい長時間タスク向け",
     "model.grok-4.5.desc": "バランス型。日常はもう少し速い",
     "model.grok-4.3.desc": "超長文脈。大きな文書向け",
+    "model.provider.xai.desc": "会話・推論・コーディング向けの xAI モデル",
+    "model.provider.openai.desc": "会話・推論・コーディング向けの OpenAI モデル",
+    "model.provider.openrouter.desc": "OpenRouter 経由で提供される統合モデル",
+    "model.provider.claude.desc": "会話・推論・コーディング向けの Anthropic モデル",
+    "model.provider.gemini.desc": "マルチモーダル・推論・コーディング向けの Google モデル",
+    "model.provider.generic.desc": "OpenAI 互換エンドポイントが提供するモデル",
+    "model.generic.desc": "会話・推論・コード生成向け",
+    "model.empty.name": "先にモデルを設定してください",
+    "model.empty.desc": "設定でモデル ID を入力してください",
+    "effort.none.name": "オフ",
+    "effort.minimal.name": "最小",
+    "effort.low.name": "低",
+    "effort.medium.name": "中",
+    "effort.high.name": "高",
+    "effort.xhigh.name": "最高",
+    "effort.none.desc": "思考強度パラメータを送信しません",
+    "effort.minimal.desc": "速度とコストを優先する最小限の思考",
     "effort.low.desc": "速い。簡単な質問とツール向け",
     "effort.medium.desc": "均衡。分析と長文脈向け",
     "effort.high.desc": "既定。難しい多段推論向け",
@@ -678,6 +774,11 @@ const state = {
   slashOpen: false,
   slashIndex: 0,
   theme: localStorage.getItem("grok-theme") || "light",
+  provider: normalizeProvider(localStorage.getItem("grok-provider") || "xai"),
+  providerBaseUrl: "",
+  providerBaseUrls: {},
+  providerCatalog: {},
+  modelCatalog: {},
   renameId: null,
   lang: localStorage.getItem("grok-lang") || "zh",
   userName: "",
@@ -702,6 +803,8 @@ const state = {
   leftW: Number(localStorage.getItem("grok-left-w")) || 280,
   rightW: Number(localStorage.getItem("grok-right-w")) || 340,
   graphH: Number(localStorage.getItem("grok-graph-h")) || 220,
+  extraUsageUrl: "https://console.x.ai",
+  extraDocsUrl: "https://docs.x.ai/build/overview",
 };
 
 const els = {
@@ -737,6 +840,25 @@ const els = {
   langMenu: $("langMenu"),
   authStatus: $("authStatus"),
   apiKey: $("apiKey"),
+  openaiApiKey: $("openaiApiKey"),
+  openrouterApiKey: $("openrouterApiKey"),
+  claudeApiKey: $("claudeApiKey"),
+  geminiApiKey: $("geminiApiKey"),
+  genericApiKey: $("genericApiKey"),
+  genericModels: $("genericModels"),
+  discoverModels: $("discoverModels"),
+  providerSelect: $("providerSelect"),
+  providerBaseUrl: $("providerBaseUrl"),
+  brandMark: $("brandMark"),
+  brandLogo: $("brandLogo"),
+  brandName: $("brandName"),
+  brandMeta: $("brandMeta"),
+  providerHero: $("providerHero"),
+  providerHeroLogo: $("providerHeroLogo"),
+  providerHeroName: $("providerHeroName"),
+  providerHeroDescription: $("providerHeroDescription"),
+  providerConnection: $("providerConnection"),
+  saveKeyLabel: $("saveKeyLabel"),
   sidebar: $("sidebar"),
   backdrop: $("sidebarBackdrop"),
   renameDialog: $("renameDialog"),
@@ -1132,7 +1254,7 @@ function agentLabel(status, role) {
 }
 
 function modelName(id) {
-  return (MODELS.find((m) => m.id === id) || {}).name || id || "";
+  return (normalizeModelOptions().find((m) => m.id === id) || MODELS.find((m) => m.id === id) || {}).name || id || "";
 }
 
 function effortName(id) {
@@ -1211,16 +1333,230 @@ function renderActivityCards(items) {
     .join("");
 }
 
+function modelOptions(provider = state.provider) {
+  const key = normalizeProvider(provider);
+  if (Object.prototype.hasOwnProperty.call(state.modelCatalog || {}, key)) {
+    return state.modelCatalog[key] || [];
+  }
+  return key === "xai" ? MODELS.map((m) => ({ ...m })) : [];
+}
+
+function providerMeta(provider = state.provider) {
+  const key = normalizeProvider(provider);
+  return state.providerCatalog?.[key] || DEFAULT_PROVIDER_META[key] || DEFAULT_PROVIDER_META.generic;
+}
+
+function providerName(provider = state.provider) {
+  const key = normalizeProvider(provider);
+  return state.providerCatalog?.[key]?.name || PROVIDERS.find((item) => item.id === key)?.name || key;
+}
+
+function effortOptions(provider = state.provider) {
+  const allowed = new Set(providerMeta(provider).efforts || []);
+  const options = EFFORTS.filter((item) => allowed.has(item.id));
+  return options.length ? options : EFFORTS.filter((item) => item.id === "medium");
+}
+
+function providerCapabilities(provider = state.provider) {
+  return new Set(providerMeta(provider).capabilities || []);
+}
+
+function slashAvailable(item, provider = state.provider) {
+  const required = SLASH_CAPABILITY[item?.id];
+  return !required || providerCapabilities(provider).has(required);
+}
+
+function applyProviderCapabilities() {
+  document.querySelectorAll("[data-mode]").forEach((button) => {
+    const item = SLASH.find((entry) => entry.id === button.dataset.mode);
+    button.hidden = Boolean(item && !slashAvailable(item));
+  });
+  const active = SLASH.find((item) => item.id === state.mode);
+  if (active && !slashAvailable(active)) {
+    state.mode = "chat";
+    localStorage.setItem("grok-mode", state.mode);
+    renderModeChip();
+  }
+}
+
+function normalizeModelCatalogEntry(raw, provider = state.provider) {
+  const entries = [];
+  for (const item of Array.isArray(raw) ? raw : []) {
+    if (!item) continue;
+    if (typeof item === "string") {
+      const id = String(item).trim();
+      if (!id) continue;
+      const preset = MODEL_BY_ID[id] || {};
+      entries.push({ id, name: preset.name || id, desc: preset.desc || "" });
+      continue;
+    }
+    const id = String(item.id || "").trim();
+    if (!id) continue;
+    entries.push({
+      id,
+      name: item.name || MODEL_BY_ID[id]?.name || id,
+      desc: item.desc || "",
+    });
+  }
+  return entries;
+}
+
+function modelDesc(item) {
+  const tDesc = item?.id ? t(`model.${item.id}.desc`) : "";
+  const localized = tDesc && tDesc !== `model.${item.id}.desc` ? tDesc : "";
+  if (localized) return localized;
+  const supplied = String(item?.desc || "").trim();
+  if (supplied && (state.lang === "zh" || !/[\u3400-\u9fff]/u.test(supplied))) return supplied;
+  return t(`model.provider.${modelProviderId(item?.id)}.desc`) || t("model.generic.desc");
+}
+
+function modelProviderId(modelId) {
+  const id = String(modelId || "").toLowerCase();
+  const prefix = id.includes("/") ? id.split("/", 1)[0] : "";
+  if (prefix === "openai" || id.startsWith("gpt-") || /(^|\/)o[134](?:-|$)/.test(id)) return "openai";
+  if (prefix === "anthropic" || id.startsWith("claude-")) return "claude";
+  if (prefix === "google" || id.startsWith("gemini-")) return "gemini";
+  if (prefix === "x-ai" || prefix === "xai" || id.startsWith("grok-")) return "xai";
+  if (prefix) return "openrouter";
+  return normalizeProvider(state.provider || "generic");
+}
+
+function effortDisplayName(item) {
+  const key = `effort.${item?.id}.name`;
+  const localized = t(key);
+  return localized !== key ? localized : item?.name || item?.id || "";
+}
+
+function modelDisplayName(item) {
+  const preset = MODEL_BY_ID[item?.id] || {};
+  return (item && item.name) || preset.name || item?.id || "";
+}
+
+function normalizeModelOptions(provider = state.provider) {
+  const raw = modelOptions(provider);
+  return raw
+    .map((item) => {
+      if (!item) return null;
+      if (typeof item === "string") {
+        const id = String(item).trim();
+        if (!id) return null;
+        return {
+          id,
+          name: modelDisplayName({ id }),
+          desc: modelDesc({ id }),
+        };
+      }
+      const id = String(item.id || "").trim();
+      if (!id) return null;
+      return {
+        id,
+        name: item.name || modelDisplayName({ id }),
+        desc: modelDesc(item),
+      };
+    })
+    .filter(Boolean);
+}
+
+function reconcileModelToProvider(value, provider = state.provider, fallback = "grok-4.6") {
+  const options = normalizeModelOptions(provider);
+  const ids = new Set(options.map((item) => item.id));
+  return ids.has(value) ? value : options[0]?.id || fallback;
+}
+
+function syncModelsToProvider(provider = state.provider) {
+  const options = normalizeModelOptions(provider);
+  const fallback = options[0]?.id || "";
+  state.model = reconcileModelToProvider(state.model, provider, fallback);
+  state.agentSettings.lead_model = reconcileModelToProvider(state.agentSettings.lead_model, provider, state.model);
+  state.agentSettings.worker_model = reconcileModelToProvider(state.agentSettings.worker_model, provider, state.model);
+}
+
+function reconcileEffortToProvider(value, provider = state.provider, fallback = "medium") {
+  const options = effortOptions(provider);
+  const ids = new Set(options.map((item) => item.id));
+  if (ids.has(value)) return value;
+  if (ids.has(fallback)) return fallback;
+  return options[0]?.id || "medium";
+}
+
+function syncEffortsToProvider(provider = state.provider) {
+  state.effort = reconcileEffortToProvider(state.effort, provider, "high");
+  state.agentSettings.lead_effort = reconcileEffortToProvider(state.agentSettings.lead_effort, provider, "high");
+  state.agentSettings.worker_effort = reconcileEffortToProvider(state.agentSettings.worker_effort, provider, "medium");
+}
+
+function providerKeyFields() {
+  return {
+    xai: { input: els.apiKey, clearFlag: "clear_api_key", valueKey: "api_key", payloadKey: "api_key" },
+    openai: {
+      input: els.openaiApiKey,
+      clearFlag: "clear_openai_api_key",
+      valueKey: "openai_api_key",
+      payloadKey: "openai_api_key",
+    },
+    openrouter: {
+      input: els.openrouterApiKey,
+      clearFlag: "clear_openrouter_api_key",
+      valueKey: "openrouter_api_key",
+      payloadKey: "openrouter_api_key",
+    },
+    claude: {
+      input: els.claudeApiKey,
+      clearFlag: "clear_claude_api_key",
+      valueKey: "claude_api_key",
+      payloadKey: "claude_api_key",
+    },
+    gemini: {
+      input: els.geminiApiKey,
+      clearFlag: "clear_gemini_api_key",
+      valueKey: "gemini_api_key",
+      payloadKey: "gemini_api_key",
+    },
+    generic: {
+      input: els.genericApiKey,
+      clearFlag: "clear_generic_api_key",
+      valueKey: "generic_api_key",
+      payloadKey: "generic_api_key",
+    },
+  };
+}
+
+function applyProviderKeyVisibility() {
+  const provider = normalizeProvider(state.provider);
+  const fields = providerKeyFields();
+  for (const [key, meta] of Object.entries(fields)) {
+    const row = meta.input?.closest(".provider-key-row");
+    if (!row) continue;
+    row.hidden = key !== provider;
+  }
+  if (els.providerBaseUrl) {
+    const baseWrapper = els.providerBaseUrl.closest(".provider-base-row");
+    if (baseWrapper) baseWrapper.hidden = provider !== "generic";
+  }
+  document.querySelectorAll(".provider-generic-row").forEach((row) => {
+    row.hidden = provider !== "generic";
+  });
+}
+
+function syncProviderModelMenus() {
+  renderModelMenu();
+  renderEffortMenu();
+  fillAgentSelects();
+  applyProviderCapabilities();
+}
+
 function fillAgentSelects() {
   const setLabel = (id, items, value) => {
     const el = $(id);
     if (!el) return;
-    el.textContent = (items.find((item) => item.id === value) || items[0] || {}).name || value;
+    el.textContent = (items.find((item) => item.id === value) || items[0] || { name: value }).name || value;
   };
-  setLabel("leadModelLabel", MODELS, state.agentSettings.lead_model);
-  setLabel("leadEffortLabel", EFFORTS, state.agentSettings.lead_effort);
-  setLabel("workerModelLabel", MODELS, state.agentSettings.worker_model);
-  setLabel("workerEffortLabel", EFFORTS, state.agentSettings.worker_effort);
+  const options = normalizeModelOptions();
+  const efforts = effortOptions();
+  setLabel("leadModelLabel", options, state.agentSettings.lead_model);
+  setLabel("leadEffortLabel", efforts, state.agentSettings.lead_effort);
+  setLabel("workerModelLabel", options, state.agentSettings.worker_model);
+  setLabel("workerEffortLabel", efforts, state.agentSettings.worker_effort);
   const slider = $("workerCount");
   const count = Number(state.agentSettings.worker_count) || 3;
   if (slider) slider.value = String(count);
@@ -1324,6 +1660,8 @@ function syncWorkerCountWarn(count) {
 function applyAgentSettings(agents) {
   if (!agents) return;
   state.agentSettings = { ...state.agentSettings, ...agents };
+  syncModelsToProvider();
+  syncEffortsToProvider();
   fillAgentSelects();
 }
 
@@ -1358,9 +1696,80 @@ function setSettingsTab(tab) {
   });
 }
 
-function openSettings(tab = "account") {
+const PROVIDER_VISUALS = Object.freeze({
+  xai: { name: "Grok", vendor: "xAI", logo: "/assets/provider-grok.svg", description: "xAI 原生能力与工具" },
+  openai: { name: "OpenAI", vendor: "OpenAI", logo: "/assets/provider-openai.svg", description: "GPT 与推理模型" },
+  openrouter: { name: "OpenRouter", vendor: "OpenRouter", logo: "/assets/provider-openrouter.svg", description: "聚合多家模型的统一入口" },
+  claude: { name: "Claude", vendor: "Anthropic", logo: "/assets/provider-claude.svg", description: "Claude 原生 API" },
+  gemini: { name: "Gemini", vendor: "Google AI", logo: "/assets/provider-gemini.svg", description: "Gemini 模型与思考能力" },
+  generic: { name: "第三方模型", vendor: "Custom API", logo: "/assets/provider-generic.svg", description: "自定义网址、密钥与模型名" },
+});
+
+function applyProviderBranding(provider = state.provider, health = null) {
+  const normalized = normalizeProvider(provider);
+  const visual = PROVIDER_VISUALS[normalized] || PROVIDER_VISUALS.xai;
+  if (els.brandMark) els.brandMark.dataset.provider = normalized;
+  if (els.brandLogo) els.brandLogo.src = visual.logo;
+  if (els.brandName) els.brandName.textContent = visual.name;
+  if (els.brandMeta) els.brandMeta.textContent = `via ${visual.vendor}`;
+  if (els.providerHero) els.providerHero.dataset.provider = normalized;
+  if (els.providerHeroLogo) els.providerHeroLogo.src = visual.logo;
+  if (els.providerHeroName) els.providerHeroName.textContent = visual.name;
+  if (els.providerHeroDescription) els.providerHeroDescription.textContent = visual.description;
+  if (els.providerConnection) {
+    const connected = health ? Boolean(health.ok) : false;
+    els.providerConnection.textContent = health ? (connected ? "密钥已生效" : "等待密钥") : "已选择";
+    els.providerConnection.classList.toggle("connected", connected);
+  }
+  if (els.saveKeyLabel) els.saveKeyLabel.textContent = `保存并切换到 ${visual.name}`;
+  if (els.providerSelect && els.providerSelect.value !== normalized) els.providerSelect.value = normalized;
+  document.querySelectorAll("[data-provider-choice]").forEach((card) => {
+    const active = card.dataset.providerChoice === normalized;
+    card.classList.toggle("active", active);
+    card.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  document.title = `${visual.name} · AI Chat`;
+}
+
+function setProviderState(provider, persist = true, rerenderMenus = true) {
+  const nextProvider = normalizeProvider(provider);
+  const changed = nextProvider !== state.provider;
+  state.provider = nextProvider;
+  applyProviderBranding(nextProvider);
+  if (changed) {
+    state.providerBaseUrl = state.providerBaseUrls[nextProvider] || "";
+    if (els.providerBaseUrl) els.providerBaseUrl.value = state.providerBaseUrl;
+  }
+  if (persist) localStorage.setItem("grok-provider", state.provider);
+  if (els.providerSelect) els.providerSelect.value = state.provider;
+  syncModelsToProvider();
+  syncEffortsToProvider();
+  if (els.genericModels && state.provider === "generic") {
+    els.genericModels.value = normalizeModelOptions("generic").map((item) => item.id).join("\n");
+  }
+  applyProviderKeyVisibility();
+  if (rerenderMenus) syncProviderModelMenus();
+}
+
+function syncProviderInputs() {
+  const provider = normalizeProvider(state.provider);
+  if (els.providerSelect) els.providerSelect.value = provider;
+  if (els.providerBaseUrl) els.providerBaseUrl.value = state.providerBaseUrl || "";
+  if (els.providerBaseUrl) state.providerBaseUrl = els.providerBaseUrl.value.trim();
+  if (els.genericModels) {
+    els.genericModels.value = normalizeModelOptions("generic").map((item) => item.id).join("\n");
+  }
+  applyProviderKeyVisibility();
+  const keyFields = providerKeyFields();
+  for (const meta of Object.values(keyFields)) {
+    if (meta.input) meta.input.value = "";
+  }
+}
+
+async function openSettings(tab = "account") {
   fillAgentSelects();
-  refreshHealth();
+  await refreshHealth();
+  syncProviderInputs();
   setSettingsTab(tab);
   els.settings.showModal();
 }
@@ -1376,9 +1785,15 @@ function renderSetMenu(menu, items, value, kind) {
   if (!menu) return;
   menu.innerHTML = items
     .map((item) => {
-      const desc = kind === "effort" ? t(`effort.${item.id}.desc`) : kind === "model" ? t(`model.${item.id}.desc`) : item.desc || "";
+      const name = kind === "effort" ? effortDisplayName(item) : item.name;
+      const desc =
+        kind === "effort"
+          ? t(`effort.${item.id}.desc`)
+          : kind === "model"
+          ? item?.desc || modelDesc(item) || t(`model.${item.id}.desc`)
+          : item.desc || "";
       return `<button type="button" class="model-option ${item.id === value ? "active" : ""}" data-pick="${item.id}" role="option">
-      <span><span class="name">${escapeHtml(item.name)}</span><span class="desc">${escapeHtml(desc)}</span></span>
+      <span><span class="name">${escapeHtml(name)}</span><span class="desc">${escapeHtml(desc)}</span></span>
       <span class="check">${item.id === value ? "✓" : ""}</span>
     </button>`;
     })
@@ -2206,13 +2621,48 @@ async function copyText(text) {
 async function api(path, options = {}) {
   const res = await fetch(path, options);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || res.statusText || "请求失败");
+  if (!res.ok) throw new Error(data.error || data.detail || res.statusText || "请求失败");
   return data;
 }
 
 async function refreshHealth() {
   try {
+    const extra = await api("/api/extras").catch(() => ({}));
     const health = await api("/api/health");
+    if (extra?.model_catalog && typeof extra.model_catalog === "object") {
+      const normalized = {};
+      for (const [provider, raw] of Object.entries(extra.model_catalog)) {
+        const list = normalizeModelCatalogEntry(raw, provider);
+        const pid = normalizeProvider(provider);
+        normalized[pid] = list;
+      }
+      if (Object.keys(normalized).length) {
+        state.modelCatalog = normalized;
+      }
+    }
+    if (extra?.provider_catalog && typeof extra.provider_catalog === "object") {
+      state.providerCatalog = extra.provider_catalog;
+    }
+    if (extra?.provider_base_urls && typeof extra.provider_base_urls === "object") {
+      state.providerBaseUrls = extra.provider_base_urls;
+    }
+    const provider = normalizeProvider(health.provider);
+    state.provider = provider;
+    localStorage.setItem("grok-provider", provider);
+    state.providerBaseUrl = String(health.provider_base_url || "").trim();
+    state.providerBaseUrls[provider] = state.providerBaseUrl;
+    state.extraUsageUrl = extra?.usage_url || state.extraUsageUrl;
+    state.extraDocsUrl = extra?.docs_url || state.extraDocsUrl;
+    if (els.providerSelect) els.providerSelect.value = provider;
+    if (els.providerBaseUrl) {
+      if (!els.providerBaseUrl.value.trim()) {
+        els.providerBaseUrl.value = state.providerBaseUrl;
+      }
+      const selectedProvider = normalizeProvider(els.providerSelect?.value || provider);
+      if (selectedProvider !== provider && els.providerSelect) {
+        els.providerSelect.value = provider;
+      }
+    }
     const name = health.user?.name || "";
     state.userName = name;
     refreshGreeting();
@@ -2226,6 +2676,11 @@ async function refreshHealth() {
       els.userSub.textContent = src;
       els.authStatus.textContent = `${src}${health.user?.email ? ` · ${health.user.email}` : ""}`;
     }
+    applyProviderBranding(provider, health);
+    syncModelsToProvider(provider);
+    syncEffortsToProvider(provider);
+    applyProviderKeyVisibility();
+    syncProviderModelMenus();
     if (health.agents) applyAgentSettings(health.agents);
     return health;
   } catch (err) {
@@ -2481,6 +2936,10 @@ async function addFiles(fileList) {
 }
 
 async function send() {
+  if (!state.model || !normalizeModelOptions().some((item) => item.id === state.model)) {
+    toast("请先在设置中配置并选择模型");
+    return;
+  }
   if (state.ask) {
     const items = askItems();
     const cur = items[state.askIndex];
@@ -2557,6 +3016,10 @@ async function send() {
   const controller = new AbortController();
   state.abort = controller;
   let autoInspect = true;
+  const provider = normalizeProvider(els.providerSelect?.value || state.provider);
+  const providerBaseUrl = (els.providerBaseUrl?.value || state.providerBaseUrl || "").trim();
+  state.provider = provider;
+  state.providerBaseUrl = providerBaseUrl;
 
   try {
     const res = await fetch("/api/chat", {
@@ -2567,6 +3030,8 @@ async function send() {
         message: text,
         file_ids: files.map((f) => f.id),
         model: state.model,
+        provider,
+        provider_base_url: providerBaseUrl,
         effort: state.effort,
         mode: state.mode,
         web_search: state.mode === "web" || state.mode === "research",
@@ -2712,7 +3177,8 @@ async function send() {
 
 function findSlash(id) {
   const key = (id || "").toLowerCase();
-  return SLASH.find((m) => m.id === key || (m.aliases || []).includes(key));
+  const item = SLASH.find((m) => m.id === key || (m.aliases || []).includes(key));
+  return item && slashAvailable(item) ? item : undefined;
 }
 
 function slashNeedle(item) {
@@ -2723,8 +3189,9 @@ function filteredSlash() {
   const raw = els.input.value;
   if (!raw.startsWith("/")) return [];
   const q = raw.slice(1).trim().toLowerCase();
-  if (!q) return SLASH;
-  return SLASH.filter((m) => slashNeedle(m).includes(q) || m.id.startsWith(q));
+  const available = SLASH.filter((item) => slashAvailable(item));
+  if (!q) return available;
+  return available.filter((m) => slashNeedle(m).includes(q) || m.id.startsWith(q));
 }
 
 function toast(text) {
@@ -2754,6 +3221,11 @@ function draftCommand(prefix, hint) {
 
 function setMode(id) {
   if (!MODE_IDS.has(id) && id !== "plan" && id !== "deep-research") return;
+  const requested = SLASH.find((item) => item.id === id);
+  if (requested && !slashAvailable(requested)) {
+    toast(`${providerName()} 当前不支持${slashName(requested)}`);
+    return;
+  }
   const mapped = id === "deep-research" || id === "plan" ? (id === "plan" ? "think" : "research") : id;
   state.mode = mapped === "chat" ? "chat" : mapped;
   if (id === "plan") state.mode = "think";
@@ -2844,7 +3316,7 @@ async function runSlash(item, arg = "") {
   if (id === "export") {
     const msgs = state.current?.messages || [];
     if (!msgs.length) return toast("当前没有对话");
-    const md = msgs.map((m) => `## ${m.role === "user" ? "User" : "Grok"}\n\n${m.content || ""}`).join("\n\n");
+    const md = msgs.map((m) => `## ${m.role === "user" ? "User" : providerName()}\n\n${m.content || ""}`).join("\n\n");
     const blob = new Blob([md], { type: "text/markdown" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -2868,7 +3340,7 @@ async function runSlash(item, arg = "") {
   }
   if (id === "effort") {
     const level = (arg || "").trim().toLowerCase().replace("extra high", "xhigh").replace("x-high", "xhigh");
-    if (EFFORTS.some((e) => e.id === level)) {
+    if (effortOptions().some((e) => e.id === level)) {
       setEffort(level);
       toast(`推理强度：${currentEffort().name}`);
     } else {
@@ -2885,8 +3357,9 @@ async function runSlash(item, arg = "") {
     return;
   }
   if (id === "usage") {
-    const extra = await api("/api/extras").catch(() => ({ usage_url: "https://console.x.ai" }));
-    showPanel("用量与账单", `<p class="status-line">额度、账单和发票在 xAI 控制台里。</p><div class="actions"><a class="primary-btn" href="${extra.usage_url || "https://console.x.ai"}" target="_blank" rel="noreferrer">打开 Usage</a></div>`);
+    const extra = await api("/api/extras").catch(() => ({}));
+    if (!extra.usage_url) return toast(`${providerName()} 没有配置用量页面`);
+    showPanel("用量与账单", `<p class="status-line">前往 ${escapeHtml(providerName())} 控制台查看额度、账单和发票。</p><div class="actions"><a class="primary-btn" href="${escapeHtml(extra.usage_url)}" target="_blank" rel="noreferrer">打开 Usage</a></div>`);
     return;
   }
   if (id === "docs" || id === "tutorial" || id === "release-notes") {
@@ -2957,27 +3430,32 @@ async function runSlash(item, arg = "") {
 }
 
 function currentModel() {
-  return MODELS.find((m) => m.id === state.model) || MODELS[0];
+  const options = normalizeModelOptions();
+  return options.find((m) => m.id === state.model) || options[0] || { id: "", name: t("model.empty.name"), desc: t("model.empty.desc") };
 }
 
 function currentEffort() {
-  return EFFORTS.find((e) => e.id === state.effort) || EFFORTS[2];
+  const options = effortOptions();
+  return options.find((e) => e.id === state.effort) || options[0];
 }
 
 function renderModelMenu() {
+  const options = normalizeModelOptions();
   els.modelLabel.textContent = currentModel().name;
-  els.modelMenu.innerHTML = MODELS.map(
+  els.modelMenu.innerHTML = options.map(
     (m) => `<button type="button" class="model-option ${m.id === state.model ? "active" : ""}" data-model="${m.id}" role="option">
-      <span><span class="name">${escapeHtml(m.name)}</span><span class="desc">${escapeHtml(t(`model.${m.id}.desc`))}</span></span>
+      <span><span class="name">${escapeHtml(m.name)}</span><span class="desc">${escapeHtml(m.desc || modelDesc(m))}</span></span>
       <span class="check">${m.id === state.model ? "✓" : ""}</span>
     </button>`
   ).join("");
 }
 
 function setModel(id, persist = true) {
-  if (!MODELS.some((m) => m.id === id)) return;
-  state.model = id;
-  if (persist) localStorage.setItem("grok-model", id);
+  const options = normalizeModelOptions();
+  const fallback = options[0]?.id || "grok-4.6";
+  const target = options.find((m) => m.id === id)?.id || fallback;
+  state.model = target;
+  if (persist) localStorage.setItem("grok-model", target);
   renderModelMenu();
   closeModelMenu();
 }
@@ -2996,18 +3474,19 @@ function closeModelMenu() {
 }
 
 function renderEffortMenu() {
-  if (els.effortLabel) els.effortLabel.textContent = currentEffort().name;
+  const options = effortOptions();
+  if (els.effortLabel) els.effortLabel.textContent = effortDisplayName(currentEffort());
   if (!els.effortMenu) return;
-  els.effortMenu.innerHTML = EFFORTS.map(
+  els.effortMenu.innerHTML = options.map(
     (e) => `<button type="button" class="model-option ${e.id === state.effort ? "active" : ""}" data-effort="${e.id}" role="option">
-      <span><span class="name">${escapeHtml(e.name)}</span><span class="desc">${escapeHtml(t(`effort.${e.id}.desc`))}</span></span>
+      <span><span class="name">${escapeHtml(effortDisplayName(e))}</span><span class="desc">${escapeHtml(t(`effort.${e.id}.desc`))}</span></span>
       <span class="check">${e.id === state.effort ? "✓" : ""}</span>
     </button>`
   ).join("");
 }
 
 function setEffort(id, persist = true) {
-  if (!EFFORTS.some((e) => e.id === id)) return;
+  if (!effortOptions().some((e) => e.id === id)) return;
   state.effort = id;
   if (persist) localStorage.setItem("grok-effort", id);
   renderEffortMenu();
@@ -3419,6 +3898,21 @@ function bindEvents() {
   });
   $("openSettings").addEventListener("click", () => openSettings("account"));
   $("closeSettings")?.addEventListener("click", () => els.settings.close());
+  els.providerSelect?.addEventListener("change", () => {
+    const provider = normalizeProvider(els.providerSelect.value);
+    setProviderState(provider, true);
+  });
+  document.querySelectorAll("[data-provider-choice]").forEach((card) => {
+    card.addEventListener("click", () => {
+      const provider = normalizeProvider(card.dataset.providerChoice);
+      if (els.providerSelect) els.providerSelect.value = provider;
+      setProviderState(provider, true);
+    });
+  });
+  els.providerBaseUrl?.addEventListener("change", () => {
+    state.providerBaseUrl = (els.providerBaseUrl.value || "").trim();
+    if (els.providerSelect) state.provider = normalizeProvider(els.providerSelect.value);
+  });
   els.settings?.addEventListener("click", (e) => {
     const tab = e.target.closest("[data-set-tab]")?.dataset.setTab;
     if (tab) {
@@ -3449,12 +3943,12 @@ function bindEvents() {
     });
   });
   const setPickers = [
-    ["leadModel", MODELS, "lead_model"],
-    ["leadEffort", EFFORTS, "lead_effort"],
-    ["workerModel", MODELS, "worker_model"],
-    ["workerEffort", EFFORTS, "worker_effort"],
+    ["leadModel", "lead_model"],
+    ["leadEffort", "lead_effort"],
+    ["workerModel", "worker_model"],
+    ["workerEffort", "worker_effort"],
   ];
-  for (const [prefix, items, key] of setPickers) {
+  for (const [prefix, key] of setPickers) {
     const picker = $(`${prefix}Picker`);
     const btn = $(`${prefix}Btn`);
     const menu = $(`${prefix}Menu`);
@@ -3464,7 +3958,9 @@ function bindEvents() {
       const open = picker.classList.contains("open");
       closeSetMenus();
       if (open) return;
-      renderSetMenu(menu, items, state.agentSettings[key], prefix.toLowerCase().includes("effort") ? "effort" : "model");
+      const isEffort = prefix.toLowerCase().includes("effort");
+      const items = isEffort ? effortOptions() : normalizeModelOptions();
+      renderSetMenu(menu, items, state.agentSettings[key], isEffort ? "effort" : "model");
       menu.hidden = false;
       picker.classList.add("open");
     });
@@ -3516,25 +4012,86 @@ function bindEvents() {
     await persistAgentSettings({ budget_tokens: BUDGET_STOPS[index] ?? 0 });
   });
   $("saveKey").addEventListener("click", async () => {
+    const provider = normalizeProvider(els.providerSelect?.value || state.provider);
+    const fields = providerKeyFields();
+    const meta = fields[provider] || fields.xai;
     const payload = {};
-    if (els.apiKey.value.trim()) payload.api_key = els.apiKey.value;
-    else return toast(t("toast.fillKey"));
+    payload.provider = provider;
+    const baseUrl = (els.providerBaseUrl?.value || "").trim();
+    if (provider === "generic") {
+      const models = (els.genericModels?.value || "")
+        .split(/[\n,]/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+      if (!baseUrl) return toast("请填写第三方 Base URL");
+      if (!models.length) return toast("请填写或自动获取至少一个模型 ID");
+      payload.provider_base_url = baseUrl;
+      payload.generic_models = [...new Set(models)];
+    }
+    if (meta?.input?.value.trim()) payload[meta.payloadKey] = meta.input.value.trim();
+    const savedHealth = await api("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const savedProvider = savedHealth?.provider ? normalizeProvider(savedHealth.provider) : null;
+    if (savedProvider !== provider) {
+      setProviderState(provider, true);
+      return toast("后端仍在运行旧版本，请重启服务后再保存");
+    }
+    const refreshedHealth = await refreshHealth();
+    if (!refreshedHealth || normalizeProvider(refreshedHealth.provider) !== provider) {
+      setProviderState(provider, true);
+      return toast("服务商切换未生效，请重启服务后重试");
+    }
+    for (const value of Object.values(fields)) {
+      if (value.input) value.input.value = "";
+    }
+    toast(t("toast.saved"));
+  });
+  els.discoverModels?.addEventListener("click", async () => {
+    const baseUrl = (els.providerBaseUrl?.value || "").trim();
+    if (!baseUrl) return toast("请先填写第三方 Base URL");
+    els.discoverModels.disabled = true;
+    try {
+      const result = await api("/api/provider-models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          base_url: baseUrl,
+          api_key: els.genericApiKey?.value.trim() || null,
+        }),
+      });
+      const models = Array.isArray(result.models) ? result.models : [];
+      if (els.genericModels) els.genericModels.value = models.join("\n");
+      state.modelCatalog.generic = normalizeModelCatalogEntry(models, "generic");
+      if (state.provider === "generic") {
+        syncModelsToProvider("generic");
+        syncProviderModelMenus();
+      }
+      toast(`已获取 ${models.length} 个模型`);
+    } catch (error) {
+      toast(error.message || "自动获取失败，请手动填写模型 ID");
+    } finally {
+      els.discoverModels.disabled = false;
+    }
+  });
+  $("clearKey").addEventListener("click", async () => {
+    const provider = normalizeProvider(els.providerSelect?.value || state.provider);
+    const fields = providerKeyFields();
+    const meta = fields[provider] || fields.xai;
+    const payload = { provider };
+    if (meta?.clearFlag) {
+      payload[meta.clearFlag] = true;
+    } else {
+      payload.clear_api_key = true;
+    }
     await api("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    els.apiKey.value = "";
-    await refreshHealth();
-    toast(t("toast.saved"));
-  });
-  $("clearKey").addEventListener("click", async () => {
-    await api("/api/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clear_api_key: true }),
-    });
-    els.apiKey.value = "";
+    if (meta?.input) meta.input.value = "";
     await refreshHealth();
   });
   $("renameConfirm").addEventListener("click", async (e) => {
